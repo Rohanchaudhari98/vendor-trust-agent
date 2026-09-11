@@ -42,6 +42,9 @@ def check_to_summary(check: VendorCheck) -> CheckSummary:
         latency_ms=check.latency_ms,
         source=check.source,
         created_at=check.created_at,
+        decision_status=getattr(check, "decision_status", None) or "pending",
+        decision_note=getattr(check, "decision_note", None),
+        decided_at=getattr(check, "decided_at", None),
     )
 
 

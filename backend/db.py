@@ -22,6 +22,7 @@ from collections.abc import Generator
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import text
 from sqlmodel import Field, Session, SQLModel, create_engine
 
 DB_PATH = Path(__file__).parent.parent / "vendor_trust.db"
@@ -66,6 +67,14 @@ class VendorCheck(SQLModel, table=True):
     # "cli" | "web" | "copilot" | "eval" | "seed"
     source: str = Field(default="web", index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
+
+    # Human decision that closes the AP loop (separate from risk_tier
+    # recommendation). "pending" until a clerk confirms pay or hold.
+    # "paid_simulated" = confirmed for payment (no real bank transfer).
+    # "held" = explicitly not paying.
+    decision_status: str = Field(default="pending", index=True)
+    decision_note: str | None = None
+    decided_at: datetime | None = None
 
 
 class VendorMaster(SQLModel, table=True):
@@ -132,6 +141,34 @@ class ChatMessage(SQLModel, table=True):
 
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
+    _migrate_vendorcheck_decision_columns()
+
+
+def _migrate_vendorcheck_decision_columns() -> None:
+    """SQLite create_all does not ALTER existing tables — add decision
+    columns for DBs created before the closed-loop fields existed."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("PRAGMA table_info(vendorcheck)")).fetchall()
+        existing = {row[1] for row in rows}
+        alters: list[str] = []
+        if "decision_status" not in existing:
+            alters.append(
+                "ALTER TABLE vendorcheck ADD COLUMN decision_status VARCHAR DEFAULT 'pending'"
+            )
+        if "decision_note" not in existing:
+            alters.append("ALTER TABLE vendorcheck ADD COLUMN decision_note VARCHAR")
+        if "decided_at" not in existing:
+            alters.append("ALTER TABLE vendorcheck ADD COLUMN decided_at DATETIME")
+        for stmt in alters:
+            conn.execute(text(stmt))
+        if alters:
+            conn.execute(
+                text(
+                    "UPDATE vendorcheck SET decision_status = 'pending' "
+                    "WHERE decision_status IS NULL"
+                )
+            )
+            conn.commit()
 
 
 def get_session() -> Generator[Session, None, None]:

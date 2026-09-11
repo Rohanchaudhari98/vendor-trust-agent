@@ -1,28 +1,46 @@
-import { Globe, Lock } from "lucide-react";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, Hand, Globe, Lock } from "lucide-react";
 import type { CheckDetail, Signal } from "../lib/types";
 import {
   CATEGORY_LABEL,
   FRAUD_PATTERN_LABEL,
+  OUTCOME_META,
   getPaymentDecision,
 } from "../lib/tiers";
 import { formatCurrency, formatDate } from "../lib/format";
 import { DecisionBadge } from "./DecisionBadge";
 import { CitationList } from "./CitationList";
+import { api } from "../lib/api";
+import { Spinner } from "./ui/Spinner";
 
-export function ReportCard({ check, compact = false }: { check: CheckDetail; compact?: boolean }) {
+export function ReportCard({
+  check,
+  compact = false,
+  showActions = true,
+}: {
+  check: CheckDetail;
+  compact?: boolean;
+  /** Hide confirm buttons in inline copilot cards. */
+  showActions?: boolean;
+}) {
+  // Compact inline cards (Ask AI) never show action buttons.
+  const actionsEnabled = showActions && !compact;
   const decision = getPaymentDecision({
     risk_tier: check.risk_tier,
     internal_match_status: check.internal_match_status,
   });
+  const outcome = OUTCOME_META[check.decision_status ?? "pending"];
+  const isPending = (check.decision_status ?? "pending") === "pending";
 
-  const internalSignals = check.signals.filter((s) =>
-    s.citations.some((c) => c.source_type === "internal") || s.category === "internal_records",
+  const internalSignals = check.signals.filter(
+    (s) =>
+      s.citations.some((c) => c.source_type === "internal") || s.category === "internal_records"
   );
   const webSignals = check.signals.filter((s) => !internalSignals.includes(s));
 
   return (
     <div className="space-y-5">
-      {/* Identity */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-xl font-bold tracking-tight text-slate-900">{check.vendor_name}</h2>
@@ -35,32 +53,37 @@ export function ReportCard({ check, compact = false }: { check: CheckDetail; com
               .join(" · ")}
           </p>
         </div>
-        <DecisionBadge
-          riskTier={check.risk_tier}
-          internalMatchStatus={check.internal_match_status}
-        />
+        <div className="flex flex-col items-end gap-1.5">
+          <DecisionBadge
+            riskTier={check.risk_tier}
+            internalMatchStatus={check.internal_match_status}
+          />
+          <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${outcome.badgeClass}`}>
+            {outcome.label}
+          </span>
+        </div>
       </div>
 
-      {/* Decision — one clear answer */}
       <div className={`rounded-xl border-l-4 px-4 py-4 ${tierBorderClass(decision.decision)}`}>
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">What to do</p>
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Recommendation</p>
         <p className="mt-1 text-xl font-bold text-slate-900">{decision.label}</p>
         <p className="mt-2 text-sm leading-relaxed text-slate-700">
           {check.recommendation || decision.reason}
         </p>
       </div>
 
+      {actionsEnabled && check.id != null && (
+        <DecisionActions check={check} isPending={isPending} />
+      )}
+
       {!compact && (
         <>
-          {/* Tavily callout — intentional brand presence */}
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-teal-300 bg-gradient-to-r from-teal-50 to-cyan-50 px-4 py-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm">
               <Globe className="h-4.5 w-4.5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-teal-900">
-                Open-web research via Tavily
-              </p>
+              <p className="text-sm font-bold text-teal-900">Open-web research via Tavily</p>
               <p className="mt-0.5 text-[11px] leading-snug text-teal-800/80">
                 Search + page extract across legitimacy, adverse media, and entity consistency
                 {check.evidence_count > 0
@@ -73,7 +96,6 @@ export function ReportCard({ check, compact = false }: { check: CheckDetail; com
             </div>
           </div>
 
-          {/* Split: your records vs web — scannable, less wall of text */}
           <div className="space-y-4">
             {internalSignals.length > 0 && (
               <EvidenceGroup
@@ -102,6 +124,7 @@ export function ReportCard({ check, compact = false }: { check: CheckDetail; com
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 pt-3 text-[11px] text-slate-500">
         <span>Checked {formatDate(check.created_at)}</span>
+        {check.decided_at ? <span>Decided {formatDate(check.decided_at)}</span> : null}
         {check.langfuse_trace_url ? (
           <a
             href={check.langfuse_trace_url}
@@ -113,6 +136,83 @@ export function ReportCard({ check, compact = false }: { check: CheckDetail; com
           </a>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function DecisionActions({ check, isPending }: { check: CheckDetail; isPending: boolean }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [overrideNote, setOverrideNote] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: ({ decision, note }: { decision: "paid_simulated" | "held"; note?: string }) =>
+      api.recordDecision(check.id!, decision, note),
+    onSuccess: (updated) => {
+      setError(null);
+      queryClient.setQueryData(["checks", check.id], updated);
+      queryClient.invalidateQueries({ queryKey: ["checks"] });
+      queryClient.invalidateQueries({ queryKey: ["kpis"] });
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  if (!isPending) {
+    const meta = OUTCOME_META[check.decision_status];
+    return (
+      <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Outcome</p>
+        <p className="mt-1 text-sm font-semibold text-slate-800">{meta.label}</p>
+        <p className="mt-1 text-xs text-slate-500">{meta.plainEnglish}</p>
+        {check.decision_note ? (
+          <p className="mt-2 text-xs text-slate-600">Note: {check.decision_note}</p>
+        ) : null}
+        <button
+          type="button"
+          disabled={mutation.isPending}
+          onClick={() => mutation.mutate({ decision: check.decision_status === "held" ? "paid_simulated" : "held" })}
+          className="mt-3 text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-900"
+        >
+          Change decision
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-300 bg-white px-4 py-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Close the loop</p>
+      <p className="mt-1 text-sm text-slate-600">
+        Record what you decided. This does not move money — it stores the AP outcome so Home and Ask
+        AI know what happened.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={mutation.isPending}
+          onClick={() => mutation.mutate({ decision: "paid_simulated", note: overrideNote || undefined })}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-green-700 px-3.5 text-xs font-semibold text-white hover:bg-green-800 disabled:opacity-60"
+        >
+          {mutation.isPending ? <Spinner className="h-3.5 w-3.5 text-white" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          Confirm pay (simulated)
+        </button>
+        <button
+          type="button"
+          disabled={mutation.isPending}
+          onClick={() => mutation.mutate({ decision: "held", note: overrideNote || undefined })}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3.5 text-xs font-semibold text-red-800 hover:bg-red-100 disabled:opacity-60"
+        >
+          <Hand className="h-3.5 w-3.5" />
+          Confirm hold
+        </button>
+      </div>
+      <input
+        value={overrideNote}
+        onChange={(e) => setOverrideNote(e.target.value)}
+        placeholder="Optional note (e.g. verified remittance by phone)"
+        className="mt-3 w-full rounded-lg border-0 bg-slate-50 px-3 py-2 text-xs text-slate-800 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-blue-500"
+      />
+      {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }
@@ -156,7 +256,6 @@ function EvidenceGroup({
   );
 }
 
-/** Compact finding: title row + short body + sources — no meta questions. */
 function FindingRow({ signal }: { signal: Signal }) {
   return (
     <section

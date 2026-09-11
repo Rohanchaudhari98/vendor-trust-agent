@@ -46,6 +46,10 @@ class CheckSummary(BaseModel):
     latency_ms: int
     source: str
     created_at: datetime
+    # Closed-loop outcome: pending | paid_simulated | held
+    decision_status: str = "pending"
+    decision_note: str | None = None
+    decided_at: datetime | None = None
 
 
 class CheckDetail(CheckSummary):
@@ -60,6 +64,13 @@ class CheckDetail(CheckSummary):
     llm_output_tokens: int
     langfuse_trace_id: str | None
     langfuse_trace_url: str | None = None
+
+
+class CheckDecisionRequest(BaseModel):
+    """Record the clerk's action that closes the AP loop."""
+
+    decision: str = Field(description="paid_simulated | held")
+    note: str | None = None
 
 
 class TierBreakdown(BaseModel):
@@ -78,6 +89,10 @@ class KPIResponse(BaseModel):
     total_cost_usd: float
     tier_breakdown: TierBreakdown
     internal_discrepancy_count: int
+    # Closed-loop outcome counts (human decisions, not risk tiers)
+    awaiting_decision: int = 0
+    paid_simulated: int = 0
+    held: int = 0
 
 
 class ObservabilityRow(BaseModel):

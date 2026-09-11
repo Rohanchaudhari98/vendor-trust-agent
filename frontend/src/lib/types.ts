@@ -13,6 +13,9 @@ export type InternalMatchStatus =
 
 export type CheckSource = "cli" | "web" | "copilot" | "eval" | "seed";
 
+/** Human outcome that closes the AP loop (separate from risk recommendation). */
+export type DecisionStatus = "pending" | "paid_simulated" | "held";
+
 export interface Citation {
   claim: string;
   source_type: "web" | "internal";
@@ -40,6 +43,9 @@ export interface CheckSummary {
   latency_ms: number;
   source: CheckSource;
   created_at: string;
+  decision_status: DecisionStatus;
+  decision_note: string | null;
+  decided_at: string | null;
 }
 
 export interface CheckDetail extends CheckSummary {
@@ -68,6 +74,9 @@ export interface KPIResponse {
   total_cost_usd: number;
   tier_breakdown: TierBreakdown;
   internal_discrepancy_count: number;
+  awaiting_decision: number;
+  paid_simulated: number;
+  held: number;
 }
 
 export interface ObservabilityRow {

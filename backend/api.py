@@ -24,10 +24,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
 from backend.copilot import router as copilot_router
-from backend.db import VendorCheck, VendorMaster, get_session, init_db
+from backend.db import VendorCheck, VendorMaster, get_session, init_db, utcnow
 from backend.pipeline_service import run_and_persist
 from backend.schemas import (
     CheckCreateRequest,
+    CheckDecisionRequest,
     CheckDetail,
     CheckSummary,
     KPIResponse,
@@ -128,6 +129,34 @@ def get_check(check_id: int, session: Session = Depends(get_session)) -> CheckDe
     return check_to_detail(check)
 
 
+ALLOWED_DECISIONS = frozenset({"paid_simulated", "held"})
+
+
+@app.post("/api/checks/{check_id}/decision", response_model=CheckDetail)
+def record_check_decision(
+    check_id: int,
+    payload: CheckDecisionRequest,
+    session: Session = Depends(get_session),
+) -> CheckDetail:
+    """Close the AP loop: record that a clerk confirmed pay (simulated)
+    or confirmed hold. Does not move money — stores the human outcome."""
+    check = session.get(VendorCheck, check_id)
+    if check is None:
+        raise HTTPException(status_code=404, detail=f"Check {check_id} not found")
+    if payload.decision not in ALLOWED_DECISIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"decision must be one of {sorted(ALLOWED_DECISIONS)}",
+        )
+    check.decision_status = payload.decision
+    check.decision_note = (payload.note or "").strip() or None
+    check.decided_at = utcnow()
+    session.add(check)
+    session.commit()
+    session.refresh(check)
+    return check_to_detail(check)
+
+
 # --- KPIs ---------------------------------------------------------------
 
 FLAGGED_TIERS = ("needs_manual_review", "medium", "high")
@@ -149,6 +178,14 @@ def get_kpis(source: str | None = Query(default=None), session: Session = Depend
     avg_cost_per_check = total_cost_usd / total_checks if total_checks else 0.0
     internal_discrepancy_count = sum(1 for c in checks if c.internal_match_status in INTERNAL_FLAG_STATUSES)
 
+    awaiting_decision = sum(
+        1 for c in checks if (getattr(c, "decision_status", None) or "pending") == "pending"
+    )
+    paid_simulated = sum(
+        1 for c in checks if getattr(c, "decision_status", None) == "paid_simulated"
+    )
+    held = sum(1 for c in checks if getattr(c, "decision_status", None) == "held")
+
     tier_breakdown = TierBreakdown()
     for c in checks:
         if hasattr(tier_breakdown, c.risk_tier):
@@ -162,6 +199,9 @@ def get_kpis(source: str | None = Query(default=None), session: Session = Depend
         total_cost_usd=total_cost_usd,
         tier_breakdown=tier_breakdown,
         internal_discrepancy_count=internal_discrepancy_count,
+        awaiting_decision=awaiting_decision,
+        paid_simulated=paid_simulated,
+        held=held,
     )
 
 

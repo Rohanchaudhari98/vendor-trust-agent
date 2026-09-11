@@ -65,9 +65,10 @@ have determined no tool can answer the question):
 Available tools:
 - search_past_checks: {"query": "<optional vendor-name substring>", "tier": \
 "<optional: clear|low|medium|high|needs_manual_review>", "limit": <int, default 10>} \
--- EXACT/structured lookup by vendor name substring, tier, or recency. Use \
-this when the user names a specific vendor or tier, or asks "have we \
-checked X" / "show me high-risk checks."
+-- EXACT/structured lookup by vendor name substring, tier, or recency. Returns \
+each check's recommendation AND decision_status (pending / paid_simulated / held). \
+Use this when the user names a specific vendor or tier, asks what was paid or \
+held, or asks "have we checked X" / "show me high-risk checks."
 - search_findings_semantically: {"query": "<a description of a fraud \
 pattern, red flag, or finding -- not a vendor name>", "limit": <int, \
 default 5>} -- SEMANTIC/meaning-based search across every finding text \
@@ -78,7 +79,8 @@ the user asks something like "have we seen a pattern like this before", \
 vendor or tier. Do not use this to look up a specific named vendor -- use \
 search_past_checks or lookup_vendor_master for that.
 - get_check_detail: {"check_id": <int>} -- returns the FULL report for one \
-past check, including every signal and citation (web and internal).
+past check, including every signal and citation (web and internal), plus \
+the human decision outcome (decision_status: pending|paid_simulated|held).
 - lookup_vendor_master: {"vendor_name": "<name>"} -- checks whether a vendor \
 name matches an internal approved-vendor record RIGHT NOW (does not run a \
 new web check), returns match status/address consistency/notes.

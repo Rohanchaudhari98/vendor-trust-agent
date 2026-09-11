@@ -1,10 +1,12 @@
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  CircleDollarSign,
   PlusCircle,
   ShieldCheck,
-  Wallet,
+  Hourglass,
+  CheckCircle2,
+  Hand,
   AlertTriangle,
   Search,
 } from "lucide-react";
@@ -17,11 +19,10 @@ import { CheckTable } from "../components/CheckTable";
 import { KpiCard } from "../components/KpiCard";
 import { LoadingBlock } from "../components/ui/Spinner";
 import { TextInput } from "../components/ui/Field";
-import { formatCurrency } from "../lib/format";
 import { useCopilot } from "../components/copilot/CopilotContext";
 
 const OUTCOME_FILTERS = [
-  { value: "", label: "All outcomes" },
+  { value: "", label: "All recommendations" },
   { value: "clear", label: "OK to pay (clear)" },
   { value: "low", label: "OK to pay (low risk)" },
   { value: "medium", label: "Review" },
@@ -55,7 +56,9 @@ export function OverviewPage() {
               with <span className="font-semibold text-teal-800">Tavily</span> and compare to your
               approved list, then answer <span className="font-semibold text-slate-800">OK to pay</span>
               , <span className="font-semibold text-slate-800">Hold</span>, or{" "}
-              <span className="font-semibold text-slate-800">Review</span>.
+              <span className="font-semibold text-slate-800">Review</span>. Open a report to{" "}
+              <span className="font-semibold text-slate-800">confirm pay or hold</span> and close the
+              loop.
             </p>
           </div>
           <Button onClick={() => setDrawerOpen(true)} icon={<PlusCircle className="h-3.5 w-3.5" />}>
@@ -82,40 +85,41 @@ export function OverviewPage() {
             }
           />
           <KpiCard
-            label="Held — don’t pay yet"
-            value={formatCurrency(kpis.data.dollars_flagged)}
-            sublabel="Invoice $ flagged for hold or review"
-            icon={CircleDollarSign}
-            tone="danger"
+            label="Awaiting decision"
+            value={(kpis.data.awaiting_decision ?? 0).toLocaleString()}
+            sublabel="Recommendation only — not yet confirmed"
+            icon={Hourglass}
+            tone="warn"
             onAskAI={() =>
               openCopilot({
-                draft: "Summarize the checks currently on Hold or Review, and why.",
+                draft: "Which checks are still awaiting a pay or hold decision?",
                 contextCheckId: null,
               })
             }
           />
           <KpiCard
-            label="OK to pay"
-            value={formatCurrency(kpis.data.dollars_cleared)}
-            sublabel="Invoice $ with no material red flags"
-            icon={Wallet}
+            label="Paid (simulated)"
+            value={(kpis.data.paid_simulated ?? 0).toLocaleString()}
+            sublabel="Clerk confirmed payment — no real bank transfer"
+            icon={CheckCircle2}
             tone="success"
             onAskAI={() =>
               openCopilot({
-                draft: "Which recent checks were OK to pay, and what evidence cleared them?",
+                draft:
+                  "Which invoices have we confirmed as paid (simulated), and why were they cleared?",
                 contextCheckId: null,
               })
             }
           />
           <KpiCard
-            label="Avg cost per check"
-            value={`$${kpis.data.avg_cost_per_check.toFixed(4)}`}
-            sublabel="Tavily + AI — usually cents"
-            icon={CircleDollarSign}
-            tone="info"
+            label="Held"
+            value={(kpis.data.held ?? 0).toLocaleString()}
+            sublabel="Clerk confirmed do-not-pay"
+            icon={Hand}
+            tone="danger"
             onAskAI={() =>
               openCopilot({
-                draft: "Break down what's driving our Tavily + AI cost per check.",
+                draft: "Which invoices did we confirm as held, and what evidence led to that?",
                 contextCheckId: null,
               })
             }
@@ -152,7 +156,7 @@ export function OverviewPage() {
           <div>
             <CardTitle>Results</CardTitle>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Click a row for the cited report
+              Recommendation vs outcome — click a row to confirm pay or hold
             </p>
           </div>
         </CardHeader>
@@ -184,6 +188,28 @@ export function OverviewPage() {
           {reports.isLoading ? <LoadingBlock /> : <CheckTable checks={reports.data ?? []} />}
         </CardBody>
       </Card>
+
+      {kpis.data ? (
+        <p className="text-center text-[11px] text-slate-500">
+          Avg research cost ${kpis.data.avg_cost_per_check.toFixed(4)} per check ·{" "}
+          <button
+            type="button"
+            className="font-semibold text-teal-700 hover:underline"
+            onClick={() =>
+              openCopilot({
+                draft: "Break down what's driving our Tavily + AI cost per check.",
+                contextCheckId: null,
+              })
+            }
+          >
+            Ask AI about costs
+          </button>
+          {" · "}
+          <Link to="/observability" className="font-semibold text-blue-600 hover:underline">
+            Costs & traces
+          </Link>
+        </p>
+      ) : null}
 
       <Drawer
         open={drawerOpen}

@@ -47,6 +47,12 @@ export const api = {
 
   getCheck: (id: number) => request<CheckDetail>(`/api/checks/${id}`),
 
+  recordDecision: (id: number, decision: "paid_simulated" | "held", note?: string) =>
+    request<CheckDetail>(`/api/checks/${id}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision, note: note ?? null }),
+    }),
+
   getKPIs: (source?: string) =>
     request<KPIResponse>(`/api/kpis${source ? `?source=${encodeURIComponent(source)}` : ""}`),
 

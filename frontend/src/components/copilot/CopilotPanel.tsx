@@ -10,9 +10,9 @@ import { useCopilot } from "./CopilotContext";
 const SESSION_STORAGE_KEY = "vta-copilot-session-id";
 
 const SUGGESTED_PROMPTS = [
+  "Which checks are still awaiting a pay or hold decision?",
   "What checks have flagged an internal vendor-master discrepancy?",
-  "Is Procter & Gamble an approved vendor on file?",
-  "Have we seen anything like a forex trading fraud risk before?",
+  "Which invoices did we confirm as held?",
   "Summarize our riskiest vendor checks so far.",
 ];
 

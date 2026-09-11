@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import type { CheckSummary } from "../lib/types";
 import { DecisionBadge } from "./DecisionBadge";
-import { getPaymentDecision } from "../lib/tiers";
+import { getPaymentDecision, OUTCOME_META } from "../lib/tiers";
 import { formatCurrency, formatRelativeTime } from "../lib/format";
 import { EmptyState } from "./ui/EmptyState";
 import { Inbox } from "lucide-react";
@@ -24,7 +24,8 @@ export function CheckTable({ checks }: { checks: CheckSummary[]; dense?: boolean
       <table className="w-full text-left">
         <thead>
           <tr className="table-head">
-            <th>What to do</th>
+            <th>Recommendation</th>
+            <th>Outcome</th>
             <th>Vendor on the invoice</th>
             <th>Amount</th>
             <th>When</th>
@@ -36,6 +37,7 @@ export function CheckTable({ checks }: { checks: CheckSummary[]; dense?: boolean
               risk_tier: check.risk_tier,
               internal_match_status: check.internal_match_status,
             });
+            const outcome = OUTCOME_META[check.decision_status ?? "pending"];
             return (
               <tr
                 key={check.id}
@@ -48,6 +50,11 @@ export function CheckTable({ checks }: { checks: CheckSummary[]; dense?: boolean
                     internalMatchStatus={check.internal_match_status}
                     showReason
                   />
+                </td>
+                <td className="align-top">
+                  <span className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-bold ${outcome.badgeClass}`}>
+                    {outcome.label}
+                  </span>
                 </td>
                 <td>
                   <p className="font-semibold text-slate-900">{check.vendor_name}</p>

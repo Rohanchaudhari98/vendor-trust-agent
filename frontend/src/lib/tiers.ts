@@ -1,4 +1,4 @@
-import type { InternalMatchStatus, RiskTier } from "./types";
+import type { DecisionStatus, InternalMatchStatus, RiskTier } from "./types";
 
 /** The only primary answer a non-expert needs: what to do with this invoice. */
 export type PaymentDecision = "pay" | "hold" | "review";
@@ -11,6 +11,27 @@ export type DecisionMeta = {
   reason: string;
   badgeClass: string;
   rowAccent: string;
+};
+
+export const OUTCOME_META: Record<
+  DecisionStatus,
+  { label: string; badgeClass: string; plainEnglish: string }
+> = {
+  pending: {
+    label: "Awaiting decision",
+    badgeClass: "bg-slate-50 text-slate-700 border border-slate-300",
+    plainEnglish: "Recommendation only — no one has confirmed pay or hold yet.",
+  },
+  paid_simulated: {
+    label: "Paid (simulated)",
+    badgeClass: "bg-green-50 text-green-800 border border-green-300",
+    plainEnglish: "Clerk confirmed payment. No real bank transfer — demo outcome only.",
+  },
+  held: {
+    label: "Held",
+    badgeClass: "bg-red-50 text-red-800 border border-red-300",
+    plainEnglish: "Clerk confirmed this invoice should not be paid yet.",
+  },
 };
 
 /**
