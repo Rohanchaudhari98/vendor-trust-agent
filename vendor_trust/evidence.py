@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -25,6 +26,10 @@ from langfuse import observe
 from tavily import AsyncTavilyClient
 
 from vendor_trust.schema import SignalCategory
+
+# Optional async progress hook: (step_id, label) — used by the web UI SSE
+# stream so clerks see each research stage complete in order.
+ProgressCallback = Callable[[str, str], Awaitable[None] | None]
 
 SCORE_THRESHOLD = 0.5
 MAX_CURATED_SOURCES = 8
@@ -217,10 +222,32 @@ async def extract_evidence(vendor_name: str, curated: list[EvidenceItem]) -> tup
     return top, credits_used
 
 
-async def build_evidence_pack(vendor_name: str, address: str | None = None) -> EvidencePack:
+async def _emit(on_progress: ProgressCallback | None, step_id: str, label: str) -> None:
+    if on_progress is None:
+        return
+    result = on_progress(step_id, label)
+    if asyncio.iscoroutine(result) or isinstance(result, Awaitable):
+        await result  # type: ignore[arg-type]
+
+
+async def build_evidence_pack(
+    vendor_name: str,
+    address: str | None = None,
+    on_progress: ProgressCallback | None = None,
+) -> EvidencePack:
     """End-to-end: plan -> search -> curate -> extract."""
     specs = plan_queries(vendor_name, address)
+    await _emit(
+        on_progress,
+        "tavily_search",
+        "Tavily searching the open web — legitimacy, adverse media, and entity consistency",
+    )
     raw_items, search_credits = await gather(specs)
     curated = curate(raw_items)
+    await _emit(
+        on_progress,
+        "tavily_extract",
+        "Tavily extracting full page content from the strongest sources",
+    )
     extracted, extract_credits = await extract_evidence(vendor_name, curated)
     return EvidencePack(items=extracted, search_credits=search_credits, extract_credits=extract_credits)

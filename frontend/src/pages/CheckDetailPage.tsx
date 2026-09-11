@@ -65,7 +65,13 @@ export function CheckDetailPage() {
       ) : (
         <Card>
           <CardBody className="bg-white p-5 sm:p-6">
-            <ReportCard check={check.data} />
+            <ReportCard
+              check={check.data}
+              onDecisionRecorded={() => {
+                // Brief success state on the card, then back to Home results.
+                window.setTimeout(() => navigate("/"), 1400);
+              }}
+            />
           </CardBody>
         </Card>
       )}

@@ -1,18 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { SendHorizontal, Sparkles, X } from "lucide-react";
+import { BookOpen, SendHorizontal, Sparkles, X } from "lucide-react";
 import { api, streamCopilotChat } from "../../lib/api";
 import type { ChatTurn } from "./ChatBubble";
 import { ChatBubble } from "./ChatBubble";
 import { Spinner } from "../ui/Spinner";
 import { useCopilot } from "./CopilotContext";
+import { formatHelpGuideMessage, HELP_TOPICS } from "../../lib/helpGuide";
+import { nextQuestionSuggestions } from "../../lib/nextQuestions";
 
 const SESSION_STORAGE_KEY = "vta-copilot-session-id";
 
 const SUGGESTED_PROMPTS = [
   "Which checks are still awaiting a pay or hold decision?",
   "What checks have flagged an internal vendor-master discrepancy?",
-  "Which invoices did we confirm as held?",
+  "Look up Duluth Trading Company on the open web and tell me if it’s safe to pay",
   "Summarize our riskiest vendor checks so far.",
 ];
 
@@ -25,7 +27,16 @@ function getOrCreateSessionId(): string {
 }
 
 export function CopilotPanel() {
-  const { open, closeCopilot, draft, setDraft, clearDraft, contextCheckId } = useCopilot();
+  const {
+    open,
+    closeCopilot,
+    draft,
+    setDraft,
+    clearDraft,
+    contextCheckId,
+    showHelpGuide,
+    clearHelpGuide,
+  } = useCopilot();
   const [sessionId] = useState(getOrCreateSessionId);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [status, setStatus] = useState<string | null>(null);
@@ -41,13 +52,21 @@ export function CopilotPanel() {
   });
 
   useEffect(() => {
-    if (history.data && turns.length === 0) {
+    if (history.data && turns.length === 0 && !showHelpGuide) {
       setTurns(
         history.data.map((m) => ({ role: m.role, content: m.content, citations: m.citations }))
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history.data]);
+  }, [history.data, showHelpGuide]);
+
+  // Keep help open via context flag (do NOT clear in an effect — React Strict
+  // Mode remounts wipe local state after clearHelpGuide, which hid the guide).
+  useEffect(() => {
+    if (open && showHelpGuide && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [open, showHelpGuide]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -55,19 +74,34 @@ export function CopilotPanel() {
 
   useEffect(() => {
     if (open) {
-      // Focus after slide-in so the prefilled draft is ready to edit/send.
       const t = window.setTimeout(() => inputRef.current?.focus(), 80);
       return () => window.clearTimeout(t);
     }
   }, [open, draft]);
 
+  const followUps = useMemo(() => {
+    if (isStreaming) return [];
+    if (showHelpGuide) {
+      return nextQuestionSuggestions({ lastAssistant: "", showingHelp: true, contextCheckId });
+    }
+    const lastAssistant = [...turns].reverse().find((t) => t.role === "assistant");
+    const lastUser = [...turns].reverse().find((t) => t.role === "user");
+    if (!lastAssistant) return [];
+    return nextQuestionSuggestions({
+      lastAssistant: lastAssistant.content,
+      lastUser: lastUser?.content,
+      contextCheckId,
+    });
+  }, [turns, isStreaming, showHelpGuide, contextCheckId]);
+
   async function send(message: string) {
     if (!message.trim() || isStreaming) return;
     setError(null);
+    clearHelpGuide();
     clearDraft();
     setTurns((prev) => [...prev, { role: "user", content: message }]);
     setIsStreaming(true);
-    setStatus("Thinking…");
+    setStatus("Working…");
 
     try {
       await streamCopilotChat(
@@ -96,7 +130,7 @@ export function CopilotPanel() {
         contextCheckId
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Copilot request failed.");
+      setError(err instanceof Error ? err.message : "Ask AI request failed.");
     } finally {
       setIsStreaming(false);
       setStatus(null);
@@ -115,7 +149,12 @@ export function CopilotPanel() {
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-teal-700">
                 <Sparkles className="h-3.5 w-3.5" />
               </div>
-              <h2 className="text-sm font-bold text-slate-800">Ask AI</h2>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-slate-800">Ask AI</h2>
+                <p className="text-[10px] font-semibold tracking-wide text-teal-700">
+                  Powered by Tavily
+                </p>
+              </div>
             </div>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
               Past reports, approved list, or a live Tavily lookup. Answers always cite sources.
@@ -139,11 +178,42 @@ export function CopilotPanel() {
         </header>
 
         <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-          {turns.length === 0 && !history.isLoading && (
+          {showHelpGuide && (
+            <div className="rounded-xl border border-teal-200 bg-white px-4 py-4 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-teal-800">
+                  <BookOpen className="h-4 w-4" />
+                  <p className="text-sm font-bold">How to use Vendor Trust</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearHelpGuide}
+                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  Dismiss
+                </button>
+              </div>
+              <p className="mb-3 text-xs leading-relaxed text-slate-600">{formatHelpGuideMessage().split("\n")[0]}</p>
+              <div className="space-y-3">
+                {HELP_TOPICS.map((topic) => (
+                  <button
+                    key={topic.title}
+                    type="button"
+                    onClick={() => setDraft(topic.askNext)}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-left transition-colors hover:border-teal-300 hover:bg-teal-50"
+                  >
+                    <p className="text-xs font-bold text-slate-800">{topic.title}</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-600">{topic.body}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {turns.length === 0 && !history.isLoading && !showHelpGuide && (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center">
               <p className="max-w-xs text-xs leading-relaxed text-slate-500">
-                Try one of these — grounded in check history, your vendor master, or live Tavily
-                search.
+                Ask about invoice history, your approved-vendor list, or run a live Tavily lookup.
               </p>
               <div className="grid w-full gap-1.5">
                 {SUGGESTED_PROMPTS.map((prompt) => (
@@ -160,8 +230,49 @@ export function CopilotPanel() {
           )}
 
           {turns.map((turn, i) => (
-            <ChatBubble key={i} turn={turn} />
+            <div key={i} className="space-y-2">
+              <ChatBubble turn={turn} />
+              {turn.role === "assistant" &&
+                i === turns.length - 1 &&
+                !isStreaming &&
+                !showHelpGuide &&
+                followUps.length > 0 && (
+                  <div className="ml-11 space-y-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      Suggested next questions
+                    </p>
+                    {followUps.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        onClick={() => setDraft(q)}
+                        className="block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left text-[11px] text-slate-700 hover:border-teal-300 hover:bg-teal-50"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
+            </div>
           ))}
+
+          {showHelpGuide && followUps.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                Suggested next questions
+              </p>
+              {followUps.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setDraft(q)}
+                  className="block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left text-[11px] text-slate-700 hover:border-teal-300 hover:bg-teal-50"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
 
           {status && (
             <div className="flex items-center gap-2 pl-11 text-xs font-medium text-slate-500">

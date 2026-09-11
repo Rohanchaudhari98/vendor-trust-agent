@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Awaitable
 
 from langfuse import get_client, observe
 from sqlmodel import Session
@@ -31,10 +32,19 @@ from sqlmodel import Session
 from backend.db import VendorCheck
 from backend.internal_records import lookup_vendor_master
 from vendor_trust.agent import DEFAULT_MODEL, run_pipeline
+from vendor_trust.evidence import ProgressCallback
 from vendor_trust.pricing import compute_cost_usd, compute_embedding_cost_usd
 from vendor_trust.schema import VendorRiskReport
 
 logger = logging.getLogger(__name__)
+
+
+async def _emit(on_progress: ProgressCallback | None, step_id: str, label: str) -> None:
+    if on_progress is None:
+        return
+    result = on_progress(step_id, label)
+    if isinstance(result, Awaitable):
+        await result
 
 
 def _signals_to_json(report: VendorRiskReport) -> str:
@@ -59,6 +69,7 @@ async def run_and_persist(
     invoice_amount: float | None = None,
     source: str = "web",
     model: str = DEFAULT_MODEL,
+    on_progress: ProgressCallback | None = None,
 ) -> VendorCheck:
     """Runs one full vendor check (internal lookup + external pipeline)
     and persists the result. `source` records which entry point
@@ -68,6 +79,11 @@ async def run_and_persist(
     that need best-effort behavior (the bare CLI, so a DB hiccup never
     breaks the interactive experience) wrap this call themselves.
     """
+    await _emit(
+        on_progress,
+        "internal",
+        "Comparing this payee to your approved-vendor list",
+    )
     internal_match = lookup_vendor_master(session, vendor_name, address)
 
     start = time.monotonic()
@@ -77,8 +93,11 @@ async def run_and_persist(
         invoice_amount=invoice_amount,
         internal_match=internal_match,
         model=model,
+        on_progress=on_progress,
     )
     latency_ms = int((time.monotonic() - start) * 1000)
+
+    await _emit(on_progress, "persist", "Saving the report to your invoice history")
 
     # Best-effort: tracing must never be able to break a vendor check.
     trace_id: str | None = None

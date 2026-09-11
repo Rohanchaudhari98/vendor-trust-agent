@@ -23,14 +23,14 @@ export const OUTCOME_META: Record<
     plainEnglish: "Recommendation only — no one has confirmed pay or hold yet.",
   },
   paid_simulated: {
-    label: "Paid (simulated)",
+    label: "Payment confirmed",
     badgeClass: "bg-green-50 text-green-800 border border-green-300",
-    plainEnglish: "Clerk confirmed payment. No real bank transfer — demo outcome only.",
+    plainEnglish: "Clerk recorded payment approval for this invoice. No bank transfer is sent from this screen.",
   },
   held: {
     label: "Held",
     badgeClass: "bg-red-50 text-red-800 border border-red-300",
-    plainEnglish: "Clerk confirmed this invoice should not be paid yet.",
+    plainEnglish: "Clerk recorded a hold — do not pay until remittance details are verified.",
   },
 };
 

@@ -1,12 +1,13 @@
-import { LayoutDashboard, Building2, ShieldCheck, Activity } from "lucide-react";
+import { LayoutDashboard, Building2, ShieldCheck, Activity, CircleHelp } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { useCopilot } from "./copilot/CopilotContext";
 
 const PRIMARY_NAV = [
   { to: "/", label: "Home", hint: "Check an invoice", icon: LayoutDashboard, end: true },
 ];
 
-const SECONDARY_NAV = [
-  { to: "/vendors", label: "Approved vendors", hint: "Your vendor list", icon: Building2 },
+const ADMIN_NAV = [
+  { to: "/vendors", label: "Approved vendors", hint: "Maintain vendor master", icon: Building2 },
   { to: "/observability", label: "Costs & traces", hint: "Spend & latency", icon: Activity },
 ];
 
@@ -45,6 +46,8 @@ function NavItem({
 }
 
 export function Sidebar() {
+  const { openCopilot } = useCopilot();
+
   return (
     <aside className="flex h-full w-[232px] shrink-0 flex-col border-r border-white/5 bg-sidebar">
       <div className="flex items-center gap-3 border-b border-white/5 px-4 py-4">
@@ -64,17 +67,29 @@ export function Sidebar() {
         {PRIMARY_NAV.map((item) => (
           <NavItem key={item.to} {...item} />
         ))}
-
-        <p className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-          Setup & ops
-        </p>
-        {SECONDARY_NAV.map((item) => (
-          <NavItem key={item.to} {...item} />
-        ))}
       </nav>
 
-      <div className="border-t border-white/5 px-4 py-4">
-        <p className="text-[11px] leading-relaxed text-slate-500">
+      <div className="space-y-1 border-t border-white/5 px-2 py-3">
+        <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+          Admin
+        </p>
+        {ADMIN_NAV.map((item) => (
+          <NavItem key={item.to} {...item} />
+        ))}
+        <button
+          type="button"
+          onClick={() => openCopilot({ showHelpGuide: true, contextCheckId: null })}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-slate-300 transition-colors hover:bg-sidebar-hover hover:text-white"
+        >
+          <CircleHelp className="h-4 w-4 shrink-0 text-sidebar-accent" />
+          <span className="min-w-0">
+            <span className="block truncate font-medium leading-tight">Want to know how to use?</span>
+            <span className="block truncate text-[10px] font-normal opacity-60">
+              Opens Ask AI with a walkthrough
+            </span>
+          </span>
+        </button>
+        <p className="px-3 pt-2 text-[11px] leading-relaxed text-slate-500">
           Catch payee impersonation before payment. Open-web evidence via{" "}
           <span className="text-sidebar-accent">Tavily</span>.
         </p>

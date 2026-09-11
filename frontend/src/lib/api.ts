@@ -35,6 +35,59 @@ export const api = {
   createCheck: (payload: CheckCreateRequest) =>
     request<CheckDetail>("/api/checks", { method: "POST", body: JSON.stringify(payload) }),
 
+  /**
+   * Live check with SSE progress events (internal → Tavily → Nebius → save).
+   * Falls back to createCheck if streaming fails to start.
+   */
+  streamCreateCheck: async (
+    payload: CheckCreateRequest,
+    onEvent: (event: CheckStreamEvent) => void,
+    signal?: AbortSignal
+  ): Promise<CheckDetail> => {
+    const res = await fetch(`${API_BASE}/api/checks/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    });
+    if (!res.ok || !res.body) {
+      // Fallback for older servers / proxies that don't support the stream route.
+      return api.createCheck(payload);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result: CheckDetail | null = null;
+    let streamError: string | null = null;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() ?? "";
+      for (const raw of chunks) {
+        const line = raw.trim();
+        if (!line.startsWith("data:")) continue;
+        const json = line.slice("data:".length).trim();
+        if (!json) continue;
+        try {
+          const event = JSON.parse(json) as CheckStreamEvent;
+          onEvent(event);
+          if (event.type === "done") result = event.check;
+          if (event.type === "error") streamError = event.message;
+        } catch {
+          // ignore partial JSON at chunk boundaries
+        }
+      }
+    }
+
+    if (streamError) throw new Error(streamError);
+    if (!result) throw new Error("Vendor check finished without a report.");
+    return result;
+  },
+
   listChecks: (params: { tier?: string; source?: string; q?: string; limit?: number } = {}) => {
     const search = new URLSearchParams();
     if (params.tier) search.set("tier", params.tier);
@@ -60,6 +113,33 @@ export const api = {
 
   listVendorMaster: () => request<VendorMasterRecord[]>("/api/vendor-master"),
 
+  createVendorMaster: (payload: {
+    vendor_name: string;
+    known_address?: string | null;
+    status?: "approved" | "watchlist" | "blocked";
+    notes?: string | null;
+    aliases?: string[];
+  }) =>
+    request<VendorMasterRecord>("/api/vendor-master", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateVendorMaster: (
+    id: number,
+    payload: {
+      vendor_name?: string;
+      known_address?: string | null;
+      status?: "approved" | "watchlist" | "blocked";
+      notes?: string | null;
+      aliases?: string[];
+    }
+  ) =>
+    request<VendorMasterRecord>(`/api/vendor-master/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   getCopilotHistory: (sessionId: string) =>
     request<ChatMessageOut[]>(`/api/copilot/history?session_id=${encodeURIComponent(sessionId)}`),
 };
@@ -67,6 +147,11 @@ export const api = {
 export type CopilotStreamEvent =
   | { type: "status"; message: string }
   | { type: "answer"; text: string; citations: import("./types").Citation[]; check_ids?: number[] }
+  | { type: "error"; message: string };
+
+export type CheckStreamEvent =
+  | { type: "step"; id: string; label?: string; status: "running" | "done" }
+  | { type: "done"; check: CheckDetail }
   | { type: "error"; message: string };
 
 /**

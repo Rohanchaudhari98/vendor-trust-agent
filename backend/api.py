@@ -13,13 +13,15 @@ point.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
@@ -35,7 +37,9 @@ from backend.schemas import (
     ObservabilityAggregate,
     ObservabilityResponse,
     TierBreakdown,
+    VendorMasterCreate,
     VendorMasterOut,
+    VendorMasterUpdate,
 )
 from backend.serializers import (
     check_to_detail,
@@ -43,6 +47,7 @@ from backend.serializers import (
     check_to_summary,
     vendor_master_to_out,
 )
+from backend.internal_records import normalize_name
 from vendor_trust.agent import DEFAULT_MODEL
 
 load_dotenv()
@@ -98,6 +103,63 @@ async def create_check(
     except Exception as exc:  # noqa: BLE001 - surface a clean 502 instead of a stack trace
         raise HTTPException(status_code=502, detail=f"Vendor check failed: {exc}") from exc
     return check_to_detail(check)
+
+
+@app.post("/api/checks/stream")
+async def create_check_stream(
+    payload: CheckCreateRequest, session: Session = Depends(get_session)
+) -> StreamingResponse:
+    """Same vendor check as POST /api/checks, but streams each research
+    stage as SSE so the dashboard can show progress (internal match →
+    Tavily search → Tavily extract → Nebius synthesis → save)."""
+
+    async def event_gen():
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
+        last_step: str | None = None
+
+        async def on_progress(step_id: str, label: str) -> None:
+            nonlocal last_step
+            if last_step is not None and last_step != step_id:
+                await queue.put({"type": "step", "id": last_step, "status": "done"})
+            last_step = step_id
+            await queue.put(
+                {"type": "step", "id": step_id, "label": label, "status": "running"}
+            )
+
+        async def runner() -> None:
+            nonlocal last_step
+            try:
+                check = await run_and_persist(
+                    session,
+                    vendor_name=payload.vendor_name,
+                    address=payload.address,
+                    invoice_amount=payload.invoice_amount,
+                    source="web",
+                    model=DEFAULT_MODEL,
+                    on_progress=on_progress,
+                )
+                if last_step is not None:
+                    await queue.put({"type": "step", "id": last_step, "status": "done"})
+                detail = check_to_detail(check)
+                await queue.put(
+                    {"type": "done", "check": detail.model_dump(mode="json")}
+                )
+            except Exception as exc:  # noqa: BLE001
+                await queue.put({"type": "error", "message": f"Vendor check failed: {exc}"})
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(runner())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"data: {json.dumps(item)}\n\n"
+        finally:
+            await task
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
 @app.get("/api/checks", response_model=list[CheckSummary])
@@ -233,13 +295,125 @@ def get_observability(
     )
 
 
-# --- Vendor Master (internal knowledge layer, read-only) -------------------
+# --- Vendor Master (approved-vendor list — used by every live check) -------
+
+_ALLOWED_VENDOR_STATUSES = frozenset({"approved", "watchlist", "blocked"})
+
+
+def _clean_aliases(aliases: list[str] | None) -> list[str]:
+    if not aliases:
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in aliases:
+        alias = (raw or "").strip()
+        if not alias:
+            continue
+        key = alias.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(alias)
+    return cleaned
 
 
 @app.get("/api/vendor-master", response_model=list[VendorMasterOut])
 def list_vendor_master(session: Session = Depends(get_session)) -> list[VendorMasterOut]:
     records = session.exec(select(VendorMaster).order_by(VendorMaster.vendor_name)).all()
     return [vendor_master_to_out(r) for r in records]
+
+
+@app.post("/api/vendor-master", response_model=VendorMasterOut, status_code=201)
+def create_vendor_master(
+    payload: VendorMasterCreate, session: Session = Depends(get_session)
+) -> VendorMasterOut:
+    name = payload.vendor_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="vendor_name is required")
+    if payload.status not in _ALLOWED_VENDOR_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of {sorted(_ALLOWED_VENDOR_STATUSES)}",
+        )
+
+    normalized = normalize_name(name)
+    existing = session.exec(
+        select(VendorMaster).where(VendorMaster.normalized_name == normalized)
+    ).first()
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A vendor matching '{name}' is already on the approved list "
+            f"(existing: {existing.vendor_name})",
+        )
+
+    record = VendorMaster(
+        vendor_name=name,
+        normalized_name=normalized,
+        known_address=(payload.known_address or "").strip() or None,
+        status=payload.status,
+        notes=(payload.notes or "").strip() or None,
+        aliases_json=json.dumps(_clean_aliases(payload.aliases)),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return vendor_master_to_out(record)
+
+
+@app.patch("/api/vendor-master/{vendor_id}", response_model=VendorMasterOut)
+def update_vendor_master(
+    vendor_id: int,
+    payload: VendorMasterUpdate,
+    session: Session = Depends(get_session),
+) -> VendorMasterOut:
+    record = session.get(VendorMaster, vendor_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Vendor {vendor_id} not found")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    if "vendor_name" in data:
+        name = (data["vendor_name"] or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="vendor_name cannot be empty")
+        normalized = normalize_name(name)
+        clash = session.exec(
+            select(VendorMaster).where(
+                VendorMaster.normalized_name == normalized,
+                VendorMaster.id != vendor_id,
+            )
+        ).first()
+        if clash is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Another vendor already matches '{name}' ({clash.vendor_name})",
+            )
+        record.vendor_name = name
+        record.normalized_name = normalized
+
+    if "known_address" in data:
+        record.known_address = (data["known_address"] or "").strip() or None
+
+    if "status" in data:
+        status = data["status"]
+        if status not in _ALLOWED_VENDOR_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"status must be one of {sorted(_ALLOWED_VENDOR_STATUSES)}",
+            )
+        record.status = status
+
+    if "notes" in data:
+        record.notes = (data["notes"] or "").strip() or None
+
+    if "aliases" in data:
+        record.aliases_json = json.dumps(_clean_aliases(data["aliases"]))
+
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return vendor_master_to_out(record)
 
 
 # --- Copilot (backend/copilot.py owns the actual agent loop) --------------

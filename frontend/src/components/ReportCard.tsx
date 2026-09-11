@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Hand, Globe, Lock } from "lucide-react";
 import type { CheckDetail, Signal } from "../lib/types";
@@ -18,11 +18,14 @@ export function ReportCard({
   check,
   compact = false,
   showActions = true,
+  onDecisionRecorded,
 }: {
   check: CheckDetail;
   compact?: boolean;
   /** Hide confirm buttons in inline copilot cards. */
   showActions?: boolean;
+  /** Fired after a successful confirm pay / confirm hold. */
+  onDecisionRecorded?: (check: CheckDetail) => void;
 }) {
   // Compact inline cards (Ask AI) never show action buttons.
   const actionsEnabled = showActions && !compact;
@@ -73,7 +76,11 @@ export function ReportCard({
       </div>
 
       {actionsEnabled && check.id != null && (
-        <DecisionActions check={check} isPending={isPending} />
+        <DecisionActions
+          check={check}
+          isPending={isPending}
+          onDecisionRecorded={onDecisionRecorded}
+        />
       )}
 
       {!compact && (
@@ -124,7 +131,7 @@ export function ReportCard({
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 pt-3 text-[11px] text-slate-500">
         <span>Checked {formatDate(check.created_at)}</span>
-        {check.decided_at ? <span>Decided {formatDate(check.decided_at)}</span> : null}
+        {check.decided_at ? <span>Decision recorded {formatDate(check.decided_at)}</span> : null}
         {check.langfuse_trace_url ? (
           <a
             href={check.langfuse_trace_url}
@@ -140,76 +147,132 @@ export function ReportCard({
   );
 }
 
-function DecisionActions({ check, isPending }: { check: CheckDetail; isPending: boolean }) {
+function DecisionActions({
+  check,
+  isPending,
+  onDecisionRecorded,
+}: {
+  check: CheckDetail;
+  isPending: boolean;
+  onDecisionRecorded?: (check: CheckDetail) => void;
+}) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [overrideNote, setOverrideNote] = useState("");
+  const [note, setNote] = useState("");
+  const [justRecorded, setJustRecorded] = useState<"paid_simulated" | "held" | null>(null);
+  const [changing, setChanging] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: ({ decision, note }: { decision: "paid_simulated" | "held"; note?: string }) =>
-      api.recordDecision(check.id!, decision, note),
-    onSuccess: (updated) => {
+    mutationFn: ({ decision, decisionNote }: { decision: "paid_simulated" | "held"; decisionNote?: string }) =>
+      api.recordDecision(check.id!, decision, decisionNote),
+    onSuccess: (updated, vars) => {
       setError(null);
+      setJustRecorded(vars.decision);
+      setChanging(false);
       queryClient.setQueryData(["checks", check.id], updated);
       queryClient.invalidateQueries({ queryKey: ["checks"] });
       queryClient.invalidateQueries({ queryKey: ["kpis"] });
+      onDecisionRecorded?.(updated);
     },
     onError: (err: Error) => setError(err.message),
   });
 
-  if (!isPending) {
-    const meta = OUTCOME_META[check.decision_status];
+  // Brief celebration state before parent may navigate/close.
+  useEffect(() => {
+    if (!justRecorded) return;
+    const t = window.setTimeout(() => setJustRecorded(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [justRecorded]);
+
+  if (justRecorded || (!isPending && !changing)) {
+    const status = justRecorded ?? check.decision_status;
+    const meta = OUTCOME_META[status];
+    const successTone =
+      status === "held"
+        ? "border-red-300 bg-red-50"
+        : "border-green-300 bg-green-50";
     return (
-      <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Outcome</p>
-        <p className="mt-1 text-sm font-semibold text-slate-800">{meta.label}</p>
-        <p className="mt-1 text-xs text-slate-500">{meta.plainEnglish}</p>
-        {check.decision_note ? (
-          <p className="mt-2 text-xs text-slate-600">Note: {check.decision_note}</p>
-        ) : null}
-        <button
-          type="button"
-          disabled={mutation.isPending}
-          onClick={() => mutation.mutate({ decision: check.decision_status === "held" ? "paid_simulated" : "held" })}
-          className="mt-3 text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-900"
-        >
-          Change decision
-        </button>
+      <div className={`rounded-xl border px-4 py-4 ${successTone}`}>
+        <div className="flex items-start gap-3">
+          <div
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+              status === "held" ? "bg-red-600 text-white" : "bg-green-700 text-white"
+            }`}
+          >
+            {status === "held" ? <Hand className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
+              Invoice decision recorded
+            </p>
+            <p className="mt-1 text-sm font-bold text-slate-900">{meta.label}</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-600">{meta.plainEnglish}</p>
+            {check.decision_note ? (
+              <p className="mt-2 text-xs text-slate-600">Note: {check.decision_note}</p>
+            ) : null}
+            <p className="mt-2 text-[11px] font-medium text-slate-500">
+              Home KPIs and the results table now show this outcome.
+            </p>
+            <button
+              type="button"
+              disabled={mutation.isPending}
+              onClick={() => {
+                setJustRecorded(null);
+                setChanging(true);
+              }}
+              className="mt-3 text-xs font-semibold text-slate-700 underline underline-offset-2 hover:text-slate-900"
+            >
+              Change decision
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="rounded-xl border border-slate-300 bg-white px-4 py-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Close the loop</p>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+        Record invoice decision
+      </p>
       <p className="mt-1 text-sm text-slate-600">
-        Record what you decided. This does not move money — it stores the AP outcome so Home and Ask
-        AI know what happened.
+        Confirm payment or confirm hold for this invoice. This updates Home and Ask AI — it does not
+        send a bank transfer.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
           disabled={mutation.isPending}
-          onClick={() => mutation.mutate({ decision: "paid_simulated", note: overrideNote || undefined })}
+          onClick={() =>
+            mutation.mutate({ decision: "paid_simulated", decisionNote: note || undefined })
+          }
           className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-green-700 px-3.5 text-xs font-semibold text-white hover:bg-green-800 disabled:opacity-60"
         >
-          {mutation.isPending ? <Spinner className="h-3.5 w-3.5 text-white" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-          Confirm pay (simulated)
+          {mutation.isPending && mutation.variables?.decision === "paid_simulated" ? (
+            <Spinner className="h-3.5 w-3.5 text-white" />
+          ) : (
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          )}
+          Confirm payment
         </button>
         <button
           type="button"
           disabled={mutation.isPending}
-          onClick={() => mutation.mutate({ decision: "held", note: overrideNote || undefined })}
+          onClick={() => mutation.mutate({ decision: "held", decisionNote: note || undefined })}
           className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3.5 text-xs font-semibold text-red-800 hover:bg-red-100 disabled:opacity-60"
         >
-          <Hand className="h-3.5 w-3.5" />
+          {mutation.isPending && mutation.variables?.decision === "held" ? (
+            <Spinner className="h-3.5 w-3.5 text-red-800" />
+          ) : (
+            <Hand className="h-3.5 w-3.5" />
+          )}
           Confirm hold
         </button>
       </div>
       <input
-        value={overrideNote}
-        onChange={(e) => setOverrideNote(e.target.value)}
-        placeholder="Optional note (e.g. verified remittance by phone)"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Optional note — e.g. verified remittance by phone"
         className="mt-3 w-full rounded-lg border-0 bg-slate-50 px-3 py-2 text-xs text-slate-800 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-blue-500"
       />
       {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}

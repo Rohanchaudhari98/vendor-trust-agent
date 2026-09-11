@@ -62,6 +62,69 @@ def test_list_vendor_master_defaults_to_empty_aliases_list(client, session):
     assert response.json()[0]["aliases"] == []
 
 
+def test_create_vendor_master(client):
+    response = client.post(
+        "/api/vendor-master",
+        json={
+            "vendor_name": "New Supplier Inc",
+            "known_address": "100 Main St, Dallas, TX",
+            "status": "approved",
+            "aliases": ["NSI", "New Supplier"],
+            "notes": "Onboarded 2026-09",
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["vendor_name"] == "New Supplier Inc"
+    assert body["known_address"] == "100 Main St, Dallas, TX"
+    assert set(body["aliases"]) == {"NSI", "New Supplier"}
+    assert body["id"] is not None
+
+    listed = client.get("/api/vendor-master").json()
+    assert any(r["vendor_name"] == "New Supplier Inc" for r in listed)
+
+
+def test_create_vendor_master_rejects_duplicate(client, session):
+    _seed_master(
+        session,
+        vendor_name="Acme Corp",
+        normalized_name=normalize_name("Acme Corp"),
+    )
+    response = client.post("/api/vendor-master", json={"vendor_name": "Acme Corp."})
+    assert response.status_code == 409
+
+
+def test_update_vendor_master_address(client, session):
+    record = _seed_master(
+        session,
+        vendor_name="FedEx Corporation",
+        normalized_name=normalize_name("FedEx Corporation"),
+        known_address="Old Address",
+        status="approved",
+    )
+    response = client.patch(
+        f"/api/vendor-master/{record.id}",
+        json={"known_address": "942 South Shady Grove Road, Memphis, TN 38120"},
+    )
+    assert response.status_code == 200
+    assert response.json()["known_address"] == "942 South Shady Grove Road, Memphis, TN 38120"
+
+    # API commit happened in another Session — expire local identity map.
+    session.expire_all()
+    match = lookup_vendor_master(
+        session,
+        "FedEx Corporation",
+        address="942 South Shady Grove Road, Memphis, TN 38120",
+    )
+    assert match.status == "approved_match"
+    assert match.address_consistent is True
+
+
+def test_update_vendor_master_not_found(client):
+    response = client.patch("/api/vendor-master/999999", json={"known_address": "Anywhere"})
+    assert response.status_code == 404
+
+
 # --- Fuzzy-match lookup (backend/internal_records.py) -----------------
 
 

@@ -18,15 +18,19 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Awaitable
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_nebius import ChatNebius
 from langfuse import observe
 from pydantic import ValidationError
 
-from vendor_trust.evidence import build_evidence_pack
+from vendor_trust.evidence import ProgressCallback, build_evidence_pack
 from vendor_trust.json_utils import extract_json_object
 from vendor_trust.schema import InternalMatchResult, RiskTier, VendorRiskReport
+
+# Re-export for callers that only import from agent.
+__all__ = ["DEFAULT_MODEL", "run_pipeline", "synthesize_report", "MIN_EVIDENCE_FOR_CONFIDENCE"]
 
 DEFAULT_MODEL = "moonshotai/Kimi-K2.6"
 
@@ -221,6 +225,14 @@ async def synthesize_report(
     return report, llm_usage
 
 
+async def _emit_progress(on_progress: ProgressCallback | None, step_id: str, label: str) -> None:
+    if on_progress is None:
+        return
+    result = on_progress(step_id, label)
+    if isinstance(result, Awaitable):
+        await result
+
+
 @observe(name="vendor_trust_pipeline")
 async def run_pipeline(
     vendor_name: str,
@@ -228,6 +240,7 @@ async def run_pipeline(
     invoice_amount: float | None = None,
     internal_match: InternalMatchResult | None = None,
     model: str = DEFAULT_MODEL,
+    on_progress: ProgressCallback | None = None,
 ) -> tuple[VendorRiskReport, dict]:
     """End-to-end: evidence gathering -> structured synthesis. Returns the
     report plus a usage dict (search/extract credits + LLM tokens) that
@@ -238,7 +251,12 @@ async def run_pipeline(
     backend/internal_records.py and pass the result in; callers without
     DB access (bare CLI/eval invocations) simply omit it and the pipeline
     falls back to external-evidence-only, exactly as before."""
-    pack = await build_evidence_pack(vendor_name, address)
+    pack = await build_evidence_pack(vendor_name, address, on_progress=on_progress)
+    await _emit_progress(
+        on_progress,
+        "nebius",
+        "Nebius model turning evidence into a cited pay / hold / review recommendation",
+    )
     report, llm_usage = await synthesize_report(
         vendor_name=vendor_name,
         evidence_text=pack.as_prompt_text(),

@@ -7,25 +7,52 @@ import { Button } from "./ui/Button";
 import { Field, TextInput } from "./ui/Field";
 import { Spinner } from "./ui/Spinner";
 import { ReportCard } from "./ReportCard";
+import {
+  applyProgressEvent,
+  CheckProgress,
+  initialProgressSteps,
+  markAllProgressDone,
+  type ProgressStep,
+} from "./CheckProgress";
 
 /**
  * Primary dashboard form for a live vendor check (Tavily + LLM +
- * internal vendor master). Honest about the 15–60s wait.
+ * internal vendor master). Shows each research stage as it completes.
  */
-export function NewCheckForm({ onDone }: { onDone?: (check: CheckDetail) => void }) {
+export function NewCheckForm({
+  onDone,
+  onDecisionRecorded,
+}: {
+  onDone?: (check: CheckDetail) => void;
+  /** After confirm pay/hold — parent can close the drawer / navigate. */
+  onDecisionRecorded?: (check: CheckDetail) => void;
+}) {
   const queryClient = useQueryClient();
   const [vendorName, setVendorName] = useState("");
   const [address, setAddress] = useState("");
   const [invoiceAmount, setInvoiceAmount] = useState("");
+  const [progress, setProgress] = useState<ProgressStep[]>(initialProgressSteps);
+  const [resultCheck, setResultCheck] = useState<CheckDetail | null>(null);
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api.createCheck({
-        vendor_name: vendorName.trim(),
-        address: address.trim() || null,
-        invoice_amount: invoiceAmount ? Number(invoiceAmount) : null,
-      }),
+    mutationFn: async () => {
+      setProgress(initialProgressSteps());
+      return api.streamCreateCheck(
+        {
+          vendor_name: vendorName.trim(),
+          address: address.trim() || null,
+          invoice_amount: invoiceAmount ? Number(invoiceAmount) : null,
+        },
+        (event) => {
+          if (event.type === "step") {
+            setProgress((prev) => applyProgressEvent(prev, event));
+          }
+        }
+      );
+    },
     onSuccess: (check) => {
+      setProgress((prev) => markAllProgressDone(prev));
+      setResultCheck(check);
       queryClient.invalidateQueries({ queryKey: ["checks"] });
       queryClient.invalidateQueries({ queryKey: ["kpis"] });
       queryClient.invalidateQueries({ queryKey: ["observability"] });
@@ -33,14 +60,29 @@ export function NewCheckForm({ onDone }: { onDone?: (check: CheckDetail) => void
     },
   });
 
-  if (mutation.isSuccess) {
+  if (resultCheck) {
     return (
       <div className="space-y-4">
         <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
-          Done — see Pay / Hold / Review below, with sources from the open web and your vendor list.
+          Research complete. Review the recommendation, then confirm payment or confirm hold so
+          Home reflects the invoice outcome.
         </div>
-        <ReportCard check={mutation.data} />
-        <Button variant="secondary" className="w-full" onClick={() => mutation.reset()}>
+        <ReportCard
+          check={resultCheck}
+          onDecisionRecorded={(updated) => {
+            setResultCheck(updated);
+            queryClient.setQueryData(["checks", updated.id], updated);
+            onDecisionRecorded?.(updated);
+          }}
+        />
+        <Button
+          variant="secondary"
+          className="w-full"
+          onClick={() => {
+            setResultCheck(null);
+            mutation.reset();
+          }}
+        >
           Check another invoice
         </Button>
       </div>
@@ -61,26 +103,26 @@ export function NewCheckForm({ onDone }: { onDone?: (check: CheckDetail) => void
           required
           value={vendorName}
           onChange={(e) => setVendorName(e.target.value)}
-          placeholder="e.g. Acme Textiles LLC"
+          placeholder="Procter & Gamble"
           disabled={mutation.isPending}
         />
       </Field>
-      <Field label="Address" hint="Optional — improves internal-record matching">
+      <Field label="Remittance address" hint="Optional — improves match against your approved list">
         <TextInput
           value={address}
           onChange={(e) => setAddress(e.target.value)}
-          placeholder="e.g. Dallas, TX"
+          placeholder="1 Procter and Gamble Plaza, Cincinnati, OH"
           disabled={mutation.isPending}
         />
       </Field>
-      <Field label="Invoice amount" hint="Optional — shown on the report and KPI totals">
+      <Field label="Invoice amount" hint="Optional — shown on the report and Home totals">
         <TextInput
           type="number"
           min="0"
           step="0.01"
           value={invoiceAmount}
           onChange={(e) => setInvoiceAmount(e.target.value)}
-          placeholder="e.g. 45231.00"
+          placeholder="48500.00"
           disabled={mutation.isPending}
         />
       </Field>
@@ -91,17 +133,12 @@ export function NewCheckForm({ onDone }: { onDone?: (check: CheckDetail) => void
         </p>
       )}
 
-      {mutation.isPending && (
-        <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800">
-          Looking up this payee on the open web (<span className="font-bold">Tavily</span>) and
-          comparing to your approved-vendor list…
-        </div>
-      )}
+      {mutation.isPending && <CheckProgress steps={progress} />}
 
       <Button type="submit" className="w-full" disabled={mutation.isPending || !vendorName.trim()}>
         {mutation.isPending ? (
           <>
-            <Spinner className="h-4 w-4 text-white" /> Checking — up to about a minute…
+            <Spinner className="h-4 w-4 text-white" /> Researching payee…
           </>
         ) : (
           <>

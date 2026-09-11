@@ -57,8 +57,8 @@ export function OverviewPage() {
               approved list, then answer <span className="font-semibold text-slate-800">OK to pay</span>
               , <span className="font-semibold text-slate-800">Hold</span>, or{" "}
               <span className="font-semibold text-slate-800">Review</span>. Open a report to{" "}
-              <span className="font-semibold text-slate-800">confirm pay or hold</span> and close the
-              loop.
+              <span className="font-semibold text-slate-800">confirm payment or confirm hold</span> so
+              Home shows the invoice outcome.
             </p>
           </div>
           <Button onClick={() => setDrawerOpen(true)} icon={<PlusCircle className="h-3.5 w-3.5" />}>
@@ -98,15 +98,15 @@ export function OverviewPage() {
             }
           />
           <KpiCard
-            label="Paid (simulated)"
+            label="Payment confirmed"
             value={(kpis.data.paid_simulated ?? 0).toLocaleString()}
-            sublabel="Clerk confirmed payment — no real bank transfer"
+            sublabel="Clerk recorded payment approval — no bank transfer from here"
             icon={CheckCircle2}
             tone="success"
             onAskAI={() =>
               openCopilot({
                 draft:
-                  "Which invoices have we confirmed as paid (simulated), and why were they cleared?",
+                  "Which invoices have we confirmed for payment, and why were they cleared?",
                 contextCheckId: null,
               })
             }
@@ -156,7 +156,7 @@ export function OverviewPage() {
           <div>
             <CardTitle>Results</CardTitle>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Recommendation vs outcome — click a row to confirm pay or hold
+              Recommendation vs recorded outcome — open a row to confirm payment or hold
             </p>
           </div>
         </CardHeader>
@@ -215,9 +215,14 @@ export function OverviewPage() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         title="Check this invoice"
-        description="Enter the payee exactly as printed. Tavily searches the open web; we also compare to your approved list. Usually 15–60 seconds."
+        description="Enter the payee exactly as printed. We compare your approved list, Tavily searches the open web, then Nebius drafts a cited recommendation. Usually 15–60 seconds."
       >
-        <NewCheckForm />
+        <NewCheckForm
+          onDecisionRecorded={() => {
+            // After confirm pay/hold, return to Home so KPIs/table feel updated.
+            window.setTimeout(() => setDrawerOpen(false), 1200);
+          }}
+        />
       </Drawer>
     </div>
   );

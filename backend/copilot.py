@@ -33,6 +33,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_nebius import ChatNebius
 from sqlmodel import Session, select
 
+from backend.copilot_fastpath import try_fast_answer
 from backend.db import ChatMessage, VendorCheck, get_session
 from backend.embeddings import search_findings_semantically
 from backend.internal_records import lookup_vendor_master
@@ -45,8 +46,8 @@ from vendor_trust.json_utils import extract_json_object
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-MAX_STEPS = 6
-HISTORY_TURNS = 20
+MAX_STEPS = 4
+HISTORY_TURNS = 12
 
 TOOLS_SCHEMA = """\
 Each turn, respond with ONLY a single JSON object -- no markdown fences, no \
@@ -127,6 +128,10 @@ speculatively.
 paragraphs, bullet points, bold for key numbers/verdicts) -- never a wall \
 of raw JSON or unformatted text. This is read directly by a business user, \
 not a developer.
+7. Be efficient: for simple list questions (awaiting decisions, held, \
+paid, discrepancies, recent high-risk), call ONE tool then `final_answer` \
+immediately. Do not chain extra tools unless the first result is empty \
+or the user asked for deep evidence.
 """
 
 
@@ -206,6 +211,31 @@ async def _run_agent_loop(
 ) -> AsyncGenerator[str, None]:
     session.add(ChatMessage(session_id=session_id, role="user", content=user_message))
     session.commit()
+
+    # Instant path for FAQ / history list questions — no Nebius round-trips.
+    # (asyncio already streams the response; LLM sequential latency is the
+    # real cost. Skipping the model is the meaningful speedup here.)
+    if context_check_id is None:
+        fast = try_fast_answer(session, user_message)
+        if fast is not None:
+            final_text, final_citations = fast
+            yield _sse("status", {"message": "Pulling from invoice history…"})
+            session.add(
+                ChatMessage(
+                    session_id=session_id,
+                    role="assistant",
+                    content=final_text,
+                    citations_json=json.dumps(final_citations),
+                )
+            )
+            session.commit()
+            yield _sse(
+                "answer",
+                {"text": final_text, "citations": final_citations, "check_ids": []},
+            )
+            return
+
+    yield _sse("status", {"message": "Working on your question…"})
 
     history = session.exec(
         select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at)

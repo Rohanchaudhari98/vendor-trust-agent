@@ -88,7 +88,14 @@ def mock_run_pipeline(monkeypatch):
         "raise_error": None,
     }
 
-    async def _fake_run_pipeline(vendor_name, address=None, invoice_amount=None, internal_match=None, model=None):
+    async def _fake_run_pipeline(
+        vendor_name,
+        address=None,
+        invoice_amount=None,
+        internal_match=None,
+        model=None,
+        on_progress=None,
+    ):
         calls.append(
             {
                 "vendor_name": vendor_name,
@@ -98,6 +105,15 @@ def mock_run_pipeline(monkeypatch):
                 "model": model,
             }
         )
+        if on_progress is not None:
+            for step_id, label in (
+                ("tavily_search", "Tavily searching the open web"),
+                ("tavily_extract", "Tavily extracting full page content"),
+                ("nebius", "Nebius model drafting recommendation"),
+            ):
+                result = on_progress(step_id, label)
+                if hasattr(result, "__await__"):
+                    await result
         if state["raise_error"] is not None:
             raise state["raise_error"]
 

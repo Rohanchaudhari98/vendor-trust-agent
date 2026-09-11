@@ -132,6 +132,25 @@ class VendorMasterOut(BaseModel):
     created_at: datetime
 
 
+class VendorMasterCreate(BaseModel):
+    vendor_name: str = Field(min_length=1)
+    known_address: str | None = None
+    status: str = "approved"  # approved | watchlist | blocked
+    notes: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+
+
+class VendorMasterUpdate(BaseModel):
+    """Partial update. Omitted fields are left unchanged; send an empty
+    string for known_address / notes to clear them."""
+
+    vendor_name: str | None = Field(default=None, min_length=1)
+    known_address: str | None = None
+    status: str | None = None
+    notes: str | None = None
+    aliases: list[str] | None = None
+
+
 class ChatMessageOut(BaseModel):
     role: str
     content: str
