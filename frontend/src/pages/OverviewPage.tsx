@@ -18,6 +18,7 @@ import { KpiCard } from "../components/KpiCard";
 import { LoadingBlock } from "../components/ui/Spinner";
 import { TextInput } from "../components/ui/Field";
 import { formatCurrency } from "../lib/format";
+import { useCopilot } from "../components/copilot/CopilotContext";
 
 const OUTCOME_FILTERS = [
   { value: "", label: "All outcomes" },
@@ -32,6 +33,7 @@ export function OverviewPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState("");
   const [tier, setTier] = useState("");
+  const { openCopilot } = useCopilot();
 
   const kpis = useQuery({ queryKey: ["kpis"], queryFn: () => api.getKPIs() });
   const reports = useQuery({
@@ -72,6 +74,12 @@ export function OverviewPage() {
             sublabel="Payee checks run so far"
             icon={ShieldCheck}
             tone="neutral"
+            onAskAI={() =>
+              openCopilot({
+                draft: "Give me a quick summary of all vendor checks so far.",
+                contextCheckId: null,
+              })
+            }
           />
           <KpiCard
             label="Held — don’t pay yet"
@@ -79,6 +87,12 @@ export function OverviewPage() {
             sublabel="Invoice $ flagged for hold or review"
             icon={CircleDollarSign}
             tone="danger"
+            onAskAI={() =>
+              openCopilot({
+                draft: "Summarize the checks currently on Hold or Review, and why.",
+                contextCheckId: null,
+              })
+            }
           />
           <KpiCard
             label="OK to pay"
@@ -86,6 +100,12 @@ export function OverviewPage() {
             sublabel="Invoice $ with no material red flags"
             icon={Wallet}
             tone="success"
+            onAskAI={() =>
+              openCopilot({
+                draft: "Which recent checks were OK to pay, and what evidence cleared them?",
+                contextCheckId: null,
+              })
+            }
           />
           <KpiCard
             label="Avg cost per check"
@@ -93,6 +113,12 @@ export function OverviewPage() {
             sublabel="Tavily + AI — usually cents"
             icon={CircleDollarSign}
             tone="info"
+            onAskAI={() =>
+              openCopilot({
+                draft: "Break down what's driving our Tavily + AI cost per check.",
+                contextCheckId: null,
+              })
+            }
           />
         </div>
       ) : null}
@@ -104,7 +130,19 @@ export function OverviewPage() {
             <span className="font-bold">{kpis.data.internal_discrepancy_count}</span> invoice
             {kpis.data.internal_discrepancy_count === 1 ? "" : "s"} match a name on your approved
             list but not the details on file. Those rows show{" "}
-            <span className="font-bold">Hold</span> below.
+            <span className="font-bold">Hold</span> below.{" "}
+            <button
+              type="button"
+              className="font-semibold text-red-900 underline underline-offset-2 hover:no-underline"
+              onClick={() =>
+                openCopilot({
+                  draft: "What checks have flagged an internal vendor-master discrepancy?",
+                  contextCheckId: null,
+                })
+              }
+            >
+              Ask AI about these →
+            </button>
           </p>
         </div>
       )}

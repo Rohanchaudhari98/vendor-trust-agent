@@ -127,3 +127,7 @@ class ChatMessageOut(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str = Field(min_length=1)
+    # Optional: when the user opens Ask AI from a report page, the UI
+    # passes that check id so "why was this held?" resolves without
+    # re-naming the vendor. Not persisted — only seeds this turn.
+    context_check_id: int | None = None

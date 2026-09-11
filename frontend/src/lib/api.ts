@@ -72,12 +72,17 @@ export async function streamCopilotChat(
   sessionId: string,
   message: string,
   onEvent: (event: CopilotStreamEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  contextCheckId?: number | null
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/copilot/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, message }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      message,
+      ...(contextCheckId != null ? { context_check_id: contextCheckId } : {}),
+    }),
     signal,
   });
   if (!res.ok || !res.body) {

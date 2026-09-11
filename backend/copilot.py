@@ -196,7 +196,12 @@ async def _dispatch_tool(session: Session, action: str, tool_input: dict) -> dic
     return {"error": f"Unknown action '{action}'. Choose one of the available tools or final_answer."}
 
 
-async def _run_agent_loop(session: Session, session_id: str, user_message: str) -> AsyncGenerator[str, None]:
+async def _run_agent_loop(
+    session: Session,
+    session_id: str,
+    user_message: str,
+    context_check_id: int | None = None,
+) -> AsyncGenerator[str, None]:
     session.add(ChatMessage(session_id=session_id, role="user", content=user_message))
     session.commit()
 
@@ -217,6 +222,34 @@ async def _run_agent_loop(session: Session, session_id: str, user_message: str) 
     # is ephemeral (recomputed per-turn from tool results), not
     # persisted on ChatMessage.
     referenced_check_ids: list[int] = []
+
+    # Seed page context (e.g. user is viewing /checks/42) so deictic
+    # questions like "why was this held?" don't need a name. Prefetch
+    # the report as a synthetic tool result so the model can answer
+    # without an extra get_check_detail round-trip.
+    if context_check_id is not None:
+        referenced_check_ids.append(context_check_id)
+        yield _sse("status", {"message": f"Loading report #{context_check_id}…"})
+        try:
+            context_result = await _dispatch_tool(
+                session, "get_check_detail", {"check_id": context_check_id}
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to load context check %s", context_check_id)
+            context_result = {"error": str(exc)}
+        messages.append(
+            HumanMessage(
+                content=(
+                    f"PAGE CONTEXT: the user is currently viewing vendor check "
+                    f"#{context_check_id}. When they say \"this\", \"this vendor\", "
+                    f"\"this report\", or ask why something was flagged/held, they "
+                    f"mean this check. Prefer answering from the report below; call "
+                    f"get_check_detail again only if you need a fresher copy.\n\n"
+                    f"TOOL RESULT for get_check_detail:\n"
+                    f"{json.dumps(context_result, default=str)}"
+                )
+            )
+        )
 
     for _ in range(MAX_STEPS):
         try:
@@ -301,7 +334,12 @@ async def _run_agent_loop(session: Session, session_id: str, user_message: str) 
 @router.post("/chat")
 async def chat(payload: ChatRequest, session: Session = Depends(get_session)) -> StreamingResponse:
     return StreamingResponse(
-        _run_agent_loop(session, payload.session_id, payload.message),
+        _run_agent_loop(
+            session,
+            payload.session_id,
+            payload.message,
+            context_check_id=payload.context_check_id,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

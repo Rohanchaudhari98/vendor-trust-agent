@@ -1,9 +1,8 @@
-import { LayoutDashboard, Building2, MessageSquare, ShieldCheck, Activity } from "lucide-react";
+import { LayoutDashboard, Building2, ShieldCheck, Activity } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const PRIMARY_NAV = [
   { to: "/", label: "Home", hint: "Check an invoice", icon: LayoutDashboard, end: true },
-  { to: "/copilot", label: "Ask AI", hint: "Questions in plain English", icon: MessageSquare },
 ];
 
 const SECONDARY_NAV = [
