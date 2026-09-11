@@ -278,3 +278,27 @@ def test_copilot_history_empty_for_unknown_session(client):
     response = client.get("/api/copilot/history", params={"session_id": "never-used"})
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_copilot_clear_history(client, scripted_copilot_llm):
+    scripted_copilot_llm([_final_answer("Hello from a short session.")])
+
+    chat = client.post(
+        "/api/copilot/chat",
+        json={"session_id": "sess-clear-me", "message": "Hi"},
+    )
+    assert chat.status_code == 200
+
+    before = client.get("/api/copilot/history", params={"session_id": "sess-clear-me"})
+    assert len(before.json()) >= 1
+
+    cleared = client.delete("/api/copilot/history", params={"session_id": "sess-clear-me"})
+    assert cleared.status_code == 200
+    assert cleared.json()["deleted"] >= 1
+
+    after = client.get("/api/copilot/history", params={"session_id": "sess-clear-me"})
+    assert after.json() == []
+
+    empty = client.delete("/api/copilot/history", params={"session_id": "sess-clear-me"})
+    assert empty.status_code == 200
+    assert empty.json()["deleted"] == 0

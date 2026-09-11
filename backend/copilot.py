@@ -383,3 +383,13 @@ def get_history(session_id: str, session: Session = Depends(get_session)) -> lis
         select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at)
     ).all()
     return [chat_message_to_out(m) for m in history]
+
+
+@router.delete("/history")
+def clear_history(session_id: str, session: Session = Depends(get_session)) -> dict[str, int]:
+    """Wipe persisted turns for a browser Ask AI session so a new chat can start clean."""
+    messages = session.exec(select(ChatMessage).where(ChatMessage.session_id == session_id)).all()
+    for message in messages:
+        session.delete(message)
+    session.commit()
+    return {"deleted": len(messages)}

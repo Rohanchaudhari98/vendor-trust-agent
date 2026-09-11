@@ -43,6 +43,7 @@ def test_observability_rows_and_aggregate(client, session, monkeypatch):
     assert round(body["aggregate"]["total_cost_usd"], 4) == 0.12
     assert body["aggregate"]["avg_latency_ms"] == 1400
     assert round(body["aggregate"]["avg_cost_usd"], 4) == 0.06
+    assert body["langfuse_url"] == "https://cloud.langfuse.com"
 
 
 def test_observability_trace_url_honors_custom_langfuse_base_url(client, session, monkeypatch):
@@ -50,9 +51,11 @@ def test_observability_trace_url_honors_custom_langfuse_base_url(client, session
     check = _seed(session, vendor_name="Custom Base Vendor", langfuse_trace_id="trace-xyz")
 
     response = client.get("/api/observability")
-    row = next(r for r in response.json()["rows"] if r["id"] == check.id)
+    body = response.json()
+    row = next(r for r in body["rows"] if r["id"] == check.id)
 
     assert row["langfuse_trace_url"] == "https://self-hosted.example.com/trace/trace-xyz"
+    assert body["langfuse_url"] == "https://self-hosted.example.com"
 
 
 def test_observability_respects_limit(client, session):

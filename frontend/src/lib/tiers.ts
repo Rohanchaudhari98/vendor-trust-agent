@@ -188,13 +188,14 @@ export const INTERNAL_MATCH_META: Record<
   },
 };
 
-/** How the check was triggered — never expose internal seed/demo wording. */
+/** How the check was triggered — short one-line labels for table chips. */
 export const SOURCE_LABEL: Record<string, string> = {
   cli: "CLI",
   web: "Dashboard",
-  copilot: "Copilot",
+  copilot: "Ask AI",
   eval: "Eval",
-  seed: "Tavily Search",
+  // Seeded history from real open-web research (not a user click on Home).
+  seed: "Web research",
 };
 
 export const FRAUD_PATTERN_LABEL: Record<string, string> = {

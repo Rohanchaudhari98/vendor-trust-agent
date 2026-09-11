@@ -142,6 +142,12 @@ export const api = {
 
   getCopilotHistory: (sessionId: string) =>
     request<ChatMessageOut[]>(`/api/copilot/history?session_id=${encodeURIComponent(sessionId)}`),
+
+  clearCopilotHistory: (sessionId: string) =>
+    request<{ deleted: number }>(
+      `/api/copilot/history?session_id=${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" }
+    ),
 };
 
 export type CopilotStreamEvent =

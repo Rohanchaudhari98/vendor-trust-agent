@@ -21,11 +21,14 @@ from backend.schemas import (
 )
 
 
+def langfuse_base_url() -> str:
+    return os.environ.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com").rstrip("/")
+
+
 def build_trace_url(trace_id: str | None) -> str | None:
     if not trace_id:
         return None
-    base_url = os.environ.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com").rstrip("/")
-    return f"{base_url}/trace/{trace_id}"
+    return f"{langfuse_base_url()}/trace/{trace_id}"
 
 
 def check_to_summary(check: VendorCheck) -> CheckSummary:

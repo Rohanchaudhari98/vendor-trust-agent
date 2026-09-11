@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { BookOpen, SendHorizontal, Sparkles, X } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, MessageSquarePlus, SendHorizontal, Sparkles, X } from "lucide-react";
 import { api, streamCopilotChat } from "../../lib/api";
 import type { ChatTurn } from "./ChatBubble";
 import { ChatBubble } from "./ChatBubble";
@@ -18,12 +18,16 @@ const SUGGESTED_PROMPTS = [
   "Summarize our riskiest vendor checks so far.",
 ];
 
-function getOrCreateSessionId(): string {
-  const existing = localStorage.getItem(SESSION_STORAGE_KEY);
-  if (existing) return existing;
+function createSessionId(): string {
   const id = crypto.randomUUID();
   localStorage.setItem(SESSION_STORAGE_KEY, id);
   return id;
+}
+
+function getOrCreateSessionId(): string {
+  const existing = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (existing) return existing;
+  return createSessionId();
 }
 
 export function CopilotPanel() {
@@ -37,7 +41,8 @@ export function CopilotPanel() {
     showHelpGuide,
     clearHelpGuide,
   } = useCopilot();
-  const [sessionId] = useState(getOrCreateSessionId);
+  const queryClient = useQueryClient();
+  const [sessionId, setSessionId] = useState(getOrCreateSessionId);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -94,6 +99,26 @@ export function CopilotPanel() {
     });
   }, [turns, isStreaming, showHelpGuide, contextCheckId]);
 
+  async function startNewSession() {
+    if (isStreaming) return;
+    const previousId = sessionId;
+    // Best-effort wipe of stored turns for the old session.
+    try {
+      await api.clearCopilotHistory(previousId);
+    } catch {
+      // Still start a fresh client session even if delete fails.
+    }
+    queryClient.removeQueries({ queryKey: ["copilot-history", previousId] });
+    const nextId = createSessionId();
+    setSessionId(nextId);
+    setTurns([]);
+    setError(null);
+    setStatus(null);
+    clearDraft();
+    clearHelpGuide();
+    window.setTimeout(() => inputRef.current?.focus(), 80);
+  }
+
   async function send(message: string) {
     if (!message.trim() || isStreaming) return;
     setError(null);
@@ -139,6 +164,8 @@ export function CopilotPanel() {
 
   if (!open) return null;
 
+  const canStartNew = !isStreaming && (turns.length > 0 || Boolean(history.data?.length));
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-slate-900/40" onClick={closeCopilot} />
@@ -168,13 +195,26 @@ export function CopilotPanel() {
               ) : null}
             </p>
           </div>
-          <button
-            onClick={closeCopilot}
-            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700"
-            aria-label="Close Ask AI"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => void startNewSession()}
+              disabled={!canStartNew}
+              title="Clear this chat and start a new session"
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="New chat"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+              New chat
+            </button>
+            <button
+              onClick={closeCopilot}
+              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700"
+              aria-label="Close Ask AI"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </header>
 
         <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">

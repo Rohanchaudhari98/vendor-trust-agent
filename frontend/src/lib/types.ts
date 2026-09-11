@@ -102,6 +102,8 @@ export interface ObservabilityResponse {
     avg_latency_ms: number;
     avg_cost_usd: number;
   };
+  /** Project home in Langfuse (from LANGFUSE_BASE_URL). */
+  langfuse_url?: string | null;
 }
 
 export interface VendorMasterRecord {

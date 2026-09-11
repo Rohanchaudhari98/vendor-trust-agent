@@ -120,6 +120,7 @@ class ObservabilityAggregate(BaseModel):
 class ObservabilityResponse(BaseModel):
     rows: list[ObservabilityRow]
     aggregate: ObservabilityAggregate
+    langfuse_url: str | None = None
 
 
 class VendorMasterOut(BaseModel):
