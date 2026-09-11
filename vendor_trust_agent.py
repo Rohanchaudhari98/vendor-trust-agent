@@ -30,9 +30,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from sqlmodel import Session
 
-from vendor_trust.agent import DEFAULT_MODEL, run_pipeline
-from vendor_trust.schema import RiskTier, VendorRiskReport
+from backend.db import VendorCheck, engine, init_db
+from backend.pipeline_service import parse_signals, run_and_persist
+from vendor_trust.agent import DEFAULT_MODEL
+from vendor_trust.schema import RiskTier
 
 load_dotenv()
 
@@ -40,11 +43,19 @@ app = typer.Typer(add_completion=False)
 console = Console()
 
 TIER_STYLE = {
-    RiskTier.CLEAR: "bold green",
-    RiskTier.LOW: "green",
-    RiskTier.MEDIUM: "yellow",
-    RiskTier.HIGH: "bold red",
-    RiskTier.NEEDS_MANUAL_REVIEW: "bold magenta",
+    RiskTier.CLEAR.value: "bold green",
+    RiskTier.LOW.value: "green",
+    RiskTier.MEDIUM.value: "yellow",
+    RiskTier.HIGH.value: "bold red",
+    RiskTier.NEEDS_MANUAL_REVIEW.value: "bold magenta",
+}
+
+INTERNAL_MATCH_LABEL = {
+    "approved_match": "Approved vendor — on file, details consistent",
+    "approved_match_discrepancy": "Approved vendor — DETAILS DO NOT MATCH what's on file",
+    "watchlist_match": "WATCHLIST — internally flagged",
+    "blocked_match": "BLOCKED — internally blocked from payment",
+    "no_match": "No internal record found (new or unrecognized vendor)",
 }
 
 
@@ -65,43 +76,63 @@ def check_required_api_keys() -> None:
     raise typer.Exit(code=1)
 
 
-def render_report(report: VendorRiskReport, usage: dict) -> None:
-    style = TIER_STYLE.get(report.risk_tier, "white")
+def render_check(check: VendorCheck) -> None:
+    """Renders a persisted VendorCheck row -- the same row backend/api.py
+    returns to the dashboard -- so what the CLI prints and what the web
+    UI shows are always built from identical data."""
+    style = TIER_STYLE.get(check.risk_tier, "white")
+    signals = parse_signals(check)
 
     header = Text()
-    header.append(f"{report.vendor_name}\n", style="bold")
-    if report.invoice_amount is not None:
-        header.append(f"Invoice amount: ${report.invoice_amount:,.2f}\n")
-    header.append(f"Sources consulted: {report.evidence_count}")
+    header.append(f"{check.vendor_name}\n", style="bold")
+    if check.invoice_amount is not None:
+        header.append(f"Invoice amount: ${check.invoice_amount:,.2f}\n")
+    header.append(f"Sources consulted: {check.evidence_count}")
     console.print(Panel(header, title="Vendor Trust Report", border_style="cyan"))
 
-    console.print(f"\n[{style}]Risk tier: {report.risk_tier.value.upper()}[/{style}]\n")
+    console.print(f"\n[{style}]Risk tier: {check.risk_tier.upper()}[/{style}]\n")
 
-    if not report.signals:
+    if check.internal_match_status:
+        internal_label = INTERNAL_MATCH_LABEL.get(check.internal_match_status, check.internal_match_status)
+        internal_style = "bold red" if check.internal_match_status in ("approved_match_discrepancy", "blocked_match") else "cyan"
+        console.print(f"[{internal_style}]Internal vendor master: {internal_label}[/{internal_style}]\n")
+
+    if not signals:
         console.print("[dim]No specific signals were raised.[/dim]\n")
 
-    for signal in report.signals:
+    for signal in signals:
         table = Table(show_header=False, box=None, padding=(0, 1))
-        table.add_row("[bold]Category[/bold]", signal.category)
-        if signal.fraud_pattern.value != "none":
-            table.add_row("[bold]Pattern[/bold]", signal.fraud_pattern.value)
-        table.add_row("[bold]Finding[/bold]", signal.finding)
-        if signal.citations:
-            cites = "\n".join(f"- {c.claim}\n  {c.source_url}" for c in signal.citations)
-            table.add_row("[bold]Citations[/bold]", cites)
+        table.add_row("[bold]Category[/bold]", signal.get("category", ""))
+        if signal.get("fraud_pattern", "none") != "none":
+            table.add_row("[bold]Pattern[/bold]", signal["fraud_pattern"])
+        table.add_row("[bold]Finding[/bold]", signal.get("finding", ""))
+        citations = signal.get("citations") or []
+        if citations:
+            cite_lines = []
+            for c in citations:
+                if c.get("source_type") == "internal":
+                    cite_lines.append(f"- {c.get('claim', '')}\n  [Internal Vendor Master]")
+                else:
+                    cite_lines.append(f"- {c.get('claim', '')}\n  {c.get('source_url', '')}")
+            table.add_row("[bold]Citations[/bold]", "\n".join(cite_lines))
         console.print(Panel(table, border_style="dim"))
 
-    console.print(Panel(Text(report.recommendation, style="bold"), title="Recommendation", border_style=style))
+    console.print(Panel(Text(check.recommendation, style="bold"), title="Recommendation", border_style=style))
 
     # The one line a business/finance stakeholder would actually read.
-    amount_str = f"${report.invoice_amount:,.2f}" if report.invoice_amount is not None else "N/A"
+    amount_str = f"${check.invoice_amount:,.2f}" if check.invoice_amount is not None else "N/A"
     console.print(
-        f"\n[bold]Invoice {amount_str} | Risk: {report.risk_tier.value.upper()} | {report.recommendation}[/bold]"
+        f"\n[bold]Invoice {amount_str} | Risk: {check.risk_tier.upper()} | {check.recommendation}[/bold]"
     )
     console.print(
-        f"[dim]Tavily usage: {usage.get('search_credits', 0)} search credit(s), "
-        f"{usage.get('extract_credits', 0)} extract credit(s)[/dim]"
+        f"[dim]Tavily usage: {check.search_credits} search credit(s), "
+        f"{check.extract_credits} extract credit(s) | Cost: ${check.cost_usd:.4f} | "
+        f"Latency: {check.latency_ms}ms[/dim]"
     )
+    if check.id is not None:
+        console.print(f"[dim]Saved to dashboard as check #{check.id} (source=cli).[/dim]")
+    else:
+        console.print("[dim]Note: result could not be saved to the local dashboard DB this run.[/dim]")
 
 
 @app.command()
@@ -122,15 +153,24 @@ def main(
     vendor = " ".join(vendor_name)
     console.print(Panel.fit(vendor, title="Checking vendor", border_style="cyan"))
 
+    init_db()
     try:
-        report, usage = asyncio.run(
-            run_pipeline(vendor_name=vendor, address=address, invoice_amount=invoice_amount, model=model)
-        )
+        with Session(engine) as session:
+            check = asyncio.run(
+                run_and_persist(
+                    session,
+                    vendor_name=vendor,
+                    address=address,
+                    invoice_amount=invoice_amount,
+                    source="cli",
+                    model=model,
+                )
+            )
     except Exception as exc:  # pragma: no cover - top-level CLI error boundary
         console.print(f"\n[bold red]Vendor check failed:[/bold red] {exc}")
         raise typer.Exit(code=1) from None
 
-    render_report(report, usage)
+    render_check(check)
 
 
 if __name__ == "__main__":

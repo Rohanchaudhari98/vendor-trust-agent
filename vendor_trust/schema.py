@@ -39,7 +39,28 @@ class RiskTier(str, Enum):
     NEEDS_MANUAL_REVIEW = "needs_manual_review"
 
 
-SignalCategory = Literal["legitimacy", "adverse_media", "entity_consistency"]
+SignalCategory = Literal["legitimacy", "adverse_media", "entity_consistency", "internal_records"]
+
+# Mirrors the "internal knowledge vs. external knowledge" split the whole
+# report is built around: the first three categories are always sourced
+# from Tavily web evidence; "internal_records" is sourced from the
+# client's own approved-vendor system of record (see InternalMatchResult
+# below) — a real AP fraud check needs both, not external search alone.
+
+
+class InternalMatchResult(BaseModel):
+    """Result of cross-referencing a vendor against the client's internal
+    approved-vendor master (backend/internal_records.py does the actual
+    DB lookup; this is the plain, DB-free result type the pure pipeline
+    receives). `status` is one of the VendorRiskReport.internal_match_status
+    values below — computed deterministically in Python, not by the LLM."""
+
+    found: bool
+    status: Literal["approved_match", "approved_match_discrepancy", "watchlist_match", "blocked_match", "no_match"]
+    matched_vendor_name: str | None = None
+    name_similarity: float | None = None
+    address_consistent: bool | None = None
+    notes: str | None = None
 
 
 class Citation(BaseModel):
@@ -48,7 +69,11 @@ class Citation(BaseModel):
     rather than a black-box LLM opinion."""
 
     claim: str = Field(description="The specific factual claim this citation supports")
-    source_url: str
+    source_type: Literal["web", "internal"] = "web"
+    source_url: str | None = Field(
+        default=None,
+        description="Required when source_type is 'web'. Omitted for 'internal' citations, which reference the internal vendor master instead of a URL.",
+    )
     source_title: str = ""
 
 
@@ -75,6 +100,13 @@ class VendorRiskReport(BaseModel):
     invoice_amount: float | None = None
     risk_tier: RiskTier
     evidence_count: int = Field(description="Total number of distinct sources consulted")
+    internal_match_status: str | None = Field(
+        default=None,
+        description=(
+            "Set deterministically from the internal vendor-master lookup, not by the LLM: "
+            "'approved_match' | 'approved_match_discrepancy' | 'watchlist_match' | 'blocked_match' | 'no_match' | None (no internal lookup performed)."
+        ),
+    )
     signals: list[RiskSignal] = Field(default_factory=list)
     recommendation: str = Field(
         description=(

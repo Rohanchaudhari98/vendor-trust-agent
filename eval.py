@@ -34,29 +34,31 @@ from pathlib import Path
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
+from sqlmodel import Session
 
-from vendor_trust.agent import run_pipeline
+from backend.db import engine, init_db
+from backend.pipeline_service import parse_signals, run_and_persist
+from vendor_trust.pricing import (
+    AP_CLERK_FULLY_LOADED_HOURLY_RATE,
+    MANUAL_CHECK_MINUTES,
+    compute_cost_usd,
+)
 
 load_dotenv()
 console = Console()
 
 FIXTURES_PATH = Path(__file__).parent / "fixtures" / "vendors.jsonl"
 
-# --- Pricing constants (sourced 2026-09-10 — verify against current pricing
-# pages before relying on these for anything beyond illustrative POC math) ---
-# Tavily pay-as-you-go tier: https://docs.tavily.com/documentation/api-credits
-TAVILY_USD_PER_CREDIT = 0.008
-# Nebius Token Factory catalog, moonshotai/Kimi-K2.6:
-# https://tokenfactory.nebius.com/model-catalog.md
-NEBIUS_USD_PER_M_INPUT = 0.95
-NEBIUS_USD_PER_M_OUTPUT = 4.00
-
-# Illustrative assumption for the "hours saved" business framing: a
-# manual pre-payment vendor check (registry lookup, news search, address
-# cross-check) by an AP clerk. This is a placeholder assumption for POC
-# math, not a benchmarked time-and-motion study — see README.
-MANUAL_CHECK_MINUTES = 10
-AP_CLERK_FULLY_LOADED_HOURLY_RATE = 35.0
+# Pricing constants now live in vendor_trust/pricing.py, shared with
+# backend/pipeline_service.py so the web dashboard's cost math always
+# matches this eval harness's math exactly.
+#
+# Every fixture now runs through run_and_persist(..., source="eval") --
+# the same funnel the CLI and web dashboard use -- rather than calling
+# run_pipeline() directly, so eval runs also cross-reference the internal
+# vendor-master table and land in the same vendor_checks table the
+# dashboard reads from (visible in Observability/History with source
+# "eval", easy to tell apart from real usage).
 
 
 @dataclass
@@ -77,11 +79,9 @@ class FixtureResult:
 
     @property
     def cost_usd(self) -> float:
-        tavily_cost = (self.search_credits + self.extract_credits) * TAVILY_USD_PER_CREDIT
-        llm_cost = (self.llm_input_tokens / 1_000_000) * NEBIUS_USD_PER_M_INPUT + (
-            self.llm_output_tokens / 1_000_000
-        ) * NEBIUS_USD_PER_M_OUTPUT
-        return tavily_cost + llm_cost
+        return compute_cost_usd(
+            self.search_credits, self.extract_credits, self.llm_input_tokens, self.llm_output_tokens
+        )
 
 
 def load_fixtures() -> list[dict]:
@@ -94,12 +94,14 @@ def load_fixtures() -> list[dict]:
     return fixtures
 
 
-async def run_fixture(fixture: dict) -> FixtureResult:
+async def run_fixture(fixture: dict, session: Session) -> FixtureResult:
     try:
-        report, usage = await run_pipeline(
+        check = await run_and_persist(
+            session,
             vendor_name=fixture["vendor_name"],
             address=fixture.get("address"),
             invoice_amount=fixture.get("invoice_amount"),
+            source="eval",
         )
     except Exception as exc:  # noqa: BLE001 - eval harness must not crash on one bad case
         return FixtureResult(
@@ -112,7 +114,8 @@ async def run_fixture(fixture: dict) -> FixtureResult:
             error=str(exc),
         )
 
-    observed_patterns = {s.fraud_pattern.value for s in report.signals}
+    signals = parse_signals(check)
+    observed_patterns = {s.get("fraud_pattern", "none") for s in signals}
     expected_pattern = fixture.get("expected_pattern", "none")
     pattern_signal_present = expected_pattern == "none" or expected_pattern in observed_patterns
 
@@ -120,15 +123,15 @@ async def run_fixture(fixture: dict) -> FixtureResult:
         vendor_name=fixture["vendor_name"],
         invoice_amount=fixture.get("invoice_amount"),
         expected_tier=fixture["expected_tier"],
-        actual_tier=report.risk_tier.value,
-        tier_match=report.risk_tier.value == fixture["expected_tier"],
+        actual_tier=check.risk_tier,
+        tier_match=check.risk_tier == fixture["expected_tier"],
         expected_pattern=expected_pattern,
         observed_patterns=observed_patterns,
         pattern_signal_present=pattern_signal_present,
-        search_credits=usage.get("search_credits", 0),
-        extract_credits=usage.get("extract_credits", 0),
-        llm_input_tokens=usage.get("llm_input_tokens", 0),
-        llm_output_tokens=usage.get("llm_output_tokens", 0),
+        search_credits=check.search_credits,
+        extract_credits=check.extract_credits,
+        llm_input_tokens=check.llm_input_tokens,
+        llm_output_tokens=check.llm_output_tokens,
     )
 
 
@@ -197,10 +200,12 @@ async def main() -> None:
     fixtures = load_fixtures()
     console.print(f"[bold]Running {len(fixtures)} fixtures through the Vendor Trust Agent pipeline...[/bold]\n")
 
+    init_db()
     results = []
-    for fixture in fixtures:
-        console.print(f"  checking [cyan]{fixture['vendor_name']}[/cyan]...")
-        results.append(await run_fixture(fixture))
+    with Session(engine) as session:
+        for fixture in fixtures:
+            console.print(f"  checking [cyan]{fixture['vendor_name']}[/cyan]...")
+            results.append(await run_fixture(fixture, session))
 
     console.print()
     render_results_table(results)
