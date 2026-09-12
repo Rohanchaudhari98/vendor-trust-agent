@@ -3,6 +3,7 @@ import type {
   CheckDetail,
   CheckSummary,
   ChatMessageOut,
+  InvoiceExtractResponse,
   KPIResponse,
   ObservabilityResponse,
   VendorMasterRecord,
@@ -34,6 +35,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   createCheck: (payload: CheckCreateRequest) =>
     request<CheckDetail>("/api/checks", { method: "POST", body: JSON.stringify(payload) }),
+
+  extractInvoice: async (file: File): Promise<InvoiceExtractResponse> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/api/invoices/extract`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body.detail ?? detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+    return res.json() as Promise<InvoiceExtractResponse>;
+  },
 
   /**
    * Live check with SSE progress events (internal → Tavily → Nebius → save).

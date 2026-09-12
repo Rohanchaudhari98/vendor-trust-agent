@@ -128,3 +128,11 @@ export interface CheckCreateRequest {
   address?: string | null;
   invoice_amount?: number | null;
 }
+
+export interface InvoiceExtractResponse {
+  vendor_name: string | null;
+  address: string | null;
+  invoice_amount: number | null;
+  filename: string | null;
+  warnings: string[];
+}

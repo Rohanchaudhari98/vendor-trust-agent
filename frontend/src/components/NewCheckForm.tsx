@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Search } from "lucide-react";
+import { FileUp, Search } from "lucide-react";
 import { api } from "../lib/api";
 import type { CheckDetail } from "../lib/types";
 import { Button } from "./ui/Button";
@@ -19,6 +19,7 @@ import {
 /**
  * Primary dashboard form for a live vendor check (Tavily + LLM +
  * internal vendor master). Shows each research stage as it completes.
+ * Upload a PDF to extract the same three fields, then run the identical pipeline.
  */
 export function NewCheckForm({
   onDone,
@@ -30,27 +31,33 @@ export function NewCheckForm({
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [vendorName, setVendorName] = useState("");
   const [address, setAddress] = useState("");
   const [invoiceAmount, setInvoiceAmount] = useState("");
+  const [sourceFile, setSourceFile] = useState<string | null>(null);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
   const [progress, setProgress] = useState<ProgressStep[]>(initialProgressSteps);
   const [resultCheck, setResultCheck] = useState<CheckDetail | null>(null);
 
   const mutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload?: {
+      vendor_name: string;
+      address: string | null;
+      invoice_amount: number | null;
+    }) => {
       setProgress(initialProgressSteps());
-      return api.streamCreateCheck(
-        {
-          vendor_name: vendorName.trim(),
-          address: address.trim() || null,
-          invoice_amount: invoiceAmount ? Number(invoiceAmount) : null,
-        },
-        (event) => {
-          if (event.type === "step") {
-            setProgress((prev) => applyProgressEvent(prev, event));
-          }
+      const body = payload ?? {
+        vendor_name: vendorName.trim(),
+        address: address.trim() || null,
+        invoice_amount: invoiceAmount ? Number(invoiceAmount) : null,
+      };
+      return api.streamCreateCheck(body, (event) => {
+        if (event.type === "step") {
+          setProgress((prev) => applyProgressEvent(prev, event));
         }
-      );
+      });
     },
     onSuccess: (check) => {
       setProgress((prev) => markAllProgressDone(prev));
@@ -61,6 +68,37 @@ export function NewCheckForm({
       onDone?.(check);
     },
   });
+
+  const applyExtractedAndRun = async (file: File) => {
+    setExtractError(null);
+    setExtracting(true);
+    try {
+      const extracted = await api.extractInvoice(file);
+      const name = (extracted.vendor_name || "").trim();
+      if (!name) {
+        throw new Error("Could not find a vendor name in this PDF.");
+      }
+      const addr = (extracted.address || "").trim();
+      const amount =
+        extracted.invoice_amount != null && !Number.isNaN(extracted.invoice_amount)
+          ? String(extracted.invoice_amount)
+          : "";
+      setVendorName(name);
+      setAddress(addr);
+      setInvoiceAmount(amount);
+      setSourceFile(extracted.filename || file.name);
+      await mutation.mutateAsync({
+        vendor_name: name,
+        address: addr || null,
+        invoice_amount: amount ? Number(amount) : null,
+      });
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Could not read this PDF.");
+    } finally {
+      setExtracting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   if (resultCheck) {
     return (
@@ -102,6 +140,7 @@ export function NewCheckForm({
           className="w-full"
           onClick={() => {
             setResultCheck(null);
+            setSourceFile(null);
             mutation.reset();
           }}
         >
@@ -111,22 +150,73 @@ export function NewCheckForm({
     );
   }
 
+  const busy = mutation.isPending || extracting;
+
   return (
     <form
       className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!vendorName.trim()) return;
-        mutation.mutate();
+        if (!vendorName.trim() || busy) return;
+        mutation.mutate(undefined);
       }}
     >
+      <div className="space-y-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void applyExtractedAndRun(file);
+          }}
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => fileInputRef.current?.click()}
+          className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center transition hover:border-blue-400 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {extracting ? (
+            <>
+              <Spinner className="h-5 w-5 text-blue-600" />
+              <span className="text-sm font-medium text-slate-700">Reading invoice…</span>
+            </>
+          ) : (
+            <>
+              <FileUp className="h-5 w-5 text-blue-600" />
+              <span className="text-sm font-semibold text-slate-800">Upload invoice PDF</span>
+              <span className="text-xs text-slate-500">
+                Extracts vendor, remittance address, and amount — then runs the same check
+              </span>
+            </>
+          )}
+        </button>
+        {sourceFile && !extracting && (
+          <p className="text-xs text-slate-500">
+            From <span className="font-medium text-slate-700">{sourceFile}</span> — edit fields below if needed, or wait for research.
+          </p>
+        )}
+        {extractError && (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {extractError}
+          </p>
+        )}
+        <div className="relative py-1 text-center text-[11px] uppercase tracking-wide text-slate-400">
+          <span className="bg-white px-2 relative z-10">or enter manually</span>
+          <span className="absolute inset-x-0 top-1/2 h-px bg-slate-200" />
+        </div>
+      </div>
+
       <Field label="Vendor name" hint="Exactly as it appears on the invoice">
         <TextInput
           required
           value={vendorName}
           onChange={(e) => setVendorName(e.target.value)}
           placeholder="Procter & Gamble"
-          disabled={mutation.isPending}
+          disabled={busy}
         />
       </Field>
       <Field label="Remittance address" hint="Optional — improves match against your approved list">
@@ -134,7 +224,7 @@ export function NewCheckForm({
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           placeholder="1 Procter and Gamble Plaza, Cincinnati, OH"
-          disabled={mutation.isPending}
+          disabled={busy}
         />
       </Field>
       <Field label="Invoice amount" hint="Optional — shown on the report and Invoice desk totals">
@@ -145,7 +235,7 @@ export function NewCheckForm({
           value={invoiceAmount}
           onChange={(e) => setInvoiceAmount(e.target.value)}
           placeholder="48500.00"
-          disabled={mutation.isPending}
+          disabled={busy}
         />
       </Field>
 
@@ -157,7 +247,7 @@ export function NewCheckForm({
 
       {mutation.isPending && <CheckProgress steps={progress} />}
 
-      <Button type="submit" className="w-full" disabled={mutation.isPending || !vendorName.trim()}>
+      <Button type="submit" className="w-full" disabled={busy || !vendorName.trim()}>
         {mutation.isPending ? (
           <>
             <Spinner className="h-4 w-4 text-white" /> Researching payee…

@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,12 +27,14 @@ from sqlmodel import Session, select
 
 from backend.copilot import router as copilot_router
 from backend.db import VendorCheck, VendorMaster, get_session, init_db, utcnow
+from backend.invoice_extract import extract_invoice_fields
 from backend.pipeline_service import run_and_persist
 from backend.schemas import (
     CheckCreateRequest,
     CheckDecisionRequest,
     CheckDetail,
     CheckSummary,
+    InvoiceExtractResponse,
     KPIResponse,
     ObservabilityAggregate,
     ObservabilityResponse,
@@ -83,6 +85,42 @@ def _on_startup() -> None:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+
+# --- Invoice PDF extract -----------------------------------------------
+
+
+@app.post("/api/invoices/extract", response_model=InvoiceExtractResponse)
+async def extract_invoice_pdf(file: UploadFile = File(...)) -> InvoiceExtractResponse:
+    """Pull vendor / remittance / amount from a PDF so the UI can run the
+    same check pipeline without re-typing fields."""
+    filename = (file.filename or "").strip() or "invoice.pdf"
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Please upload a PDF invoice")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF must be under 8 MB")
+    try:
+        fields = extract_invoice_fields(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"Could not read PDF: {exc}") from exc
+    if not fields.vendor_name:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not find a vendor name in this PDF. Enter fields manually.",
+        )
+    return InvoiceExtractResponse(
+        vendor_name=fields.vendor_name,
+        address=fields.address,
+        invoice_amount=fields.invoice_amount,
+        filename=filename,
+        warnings=fields.warnings,
+    )
 
 
 # --- Checks -----------------------------------------------------------

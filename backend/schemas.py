@@ -16,6 +16,16 @@ class CheckCreateRequest(BaseModel):
     invoice_amount: float | None = None
 
 
+class InvoiceExtractResponse(BaseModel):
+    """Fields pulled from an uploaded invoice PDF — same shape the check form uses."""
+
+    vendor_name: str | None = None
+    address: str | None = None
+    invoice_amount: float | None = None
+    filename: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class CitationOut(BaseModel):
     claim: str
     source_type: str = "web"
