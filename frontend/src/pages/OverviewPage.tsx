@@ -9,6 +9,8 @@ import {
   Hand,
   AlertTriangle,
   Search,
+  CircleDollarSign,
+  Banknote,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "../components/ui/Card";
@@ -20,6 +22,7 @@ import { KpiCard } from "../components/KpiCard";
 import { LoadingBlock } from "../components/ui/Spinner";
 import { TextInput } from "../components/ui/Field";
 import { useCopilot } from "../components/copilot/CopilotContext";
+import { formatCurrency } from "../lib/format";
 
 const OUTCOME_FILTERS = [
   { value: "", label: "All recommendations" },
@@ -70,60 +73,99 @@ export function OverviewPage() {
       {kpis.isLoading ? (
         <LoadingBlock label="Loading summary…" />
       ) : kpis.data ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard
-            label="Invoices checked"
-            value={kpis.data.total_checks.toLocaleString()}
-            sublabel="Payee checks run so far"
-            icon={ShieldCheck}
-            tone="neutral"
-            onAskAI={() =>
-              openCopilot({
-                draft: "Give me a quick summary of all vendor checks so far.",
-                contextCheckId: null,
-              })
-            }
-          />
-          <KpiCard
-            label="Awaiting decision"
-            value={(kpis.data.awaiting_decision ?? 0).toLocaleString()}
-            sublabel="Recommendation only — not yet confirmed"
-            icon={Hourglass}
-            tone="warn"
-            onAskAI={() =>
-              openCopilot({
-                draft: "Which checks are still awaiting a pay or hold decision?",
-                contextCheckId: null,
-              })
-            }
-          />
-          <KpiCard
-            label="Payment confirmed"
-            value={(kpis.data.paid_simulated ?? 0).toLocaleString()}
-            sublabel="Clerk recorded payment approval — no bank transfer from here"
-            icon={CheckCircle2}
-            tone="success"
-            onAskAI={() =>
-              openCopilot({
-                draft:
-                  "Which invoices have we confirmed for payment, and why were they cleared?",
-                contextCheckId: null,
-              })
-            }
-          />
-          <KpiCard
-            label="Held"
-            value={(kpis.data.held ?? 0).toLocaleString()}
-            sublabel="Clerk confirmed do-not-pay"
-            icon={Hand}
-            tone="danger"
-            onAskAI={() =>
-              openCopilot({
-                draft: "Which invoices did we confirm as held, and what evidence led to that?",
-                contextCheckId: null,
-              })
-            }
-          />
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <KpiCard
+              label="Invoices checked"
+              value={kpis.data.total_checks.toLocaleString()}
+              sublabel="Payee checks run so far"
+              icon={ShieldCheck}
+              tone="neutral"
+              onAskAI={() =>
+                openCopilot({
+                  draft: "Give me a quick summary of all vendor checks so far.",
+                  contextCheckId: null,
+                })
+              }
+            />
+            <KpiCard
+              label="Awaiting decision"
+              value={(kpis.data.awaiting_decision ?? 0).toLocaleString()}
+              sublabel="Recommendation only — not yet confirmed"
+              icon={Hourglass}
+              tone="warn"
+              onAskAI={() =>
+                openCopilot({
+                  draft: "Which checks are still awaiting a pay or hold decision?",
+                  contextCheckId: null,
+                })
+              }
+            />
+            <KpiCard
+              label="Payment confirmed"
+              value={(kpis.data.paid_simulated ?? 0).toLocaleString()}
+              sublabel="Clerk recorded payment approval — no bank transfer from here"
+              icon={CheckCircle2}
+              tone="success"
+              onAskAI={() =>
+                openCopilot({
+                  draft:
+                    "Which invoices have we confirmed for payment, and why were they cleared?",
+                  contextCheckId: null,
+                })
+              }
+            />
+            <KpiCard
+              label="Held"
+              value={(kpis.data.held ?? 0).toLocaleString()}
+              sublabel="Clerk confirmed do-not-pay"
+              icon={Hand}
+              tone="danger"
+              onAskAI={() =>
+                openCopilot({
+                  draft: "Which invoices did we confirm as held, and what evidence led to that?",
+                  contextCheckId: null,
+                })
+              }
+            />
+          </div>
+
+          {/* Dollar funnel from existing KPI fields — flagged ≠ proven fraud. */}
+          <div>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+              Invoice dollars
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <KpiCard
+                label="$ under review before release"
+                value={formatCurrency(kpis.data.dollars_flagged)}
+                sublabel="Invoice amounts on Hold / Review recommendations — not confirmed fraud losses"
+                icon={CircleDollarSign}
+                tone="warn"
+                onAskAI={() =>
+                  openCopilot({
+                    draft:
+                      "How much invoice dollar volume is currently under review or hold, and which vendors drive that?",
+                    contextCheckId: null,
+                  })
+                }
+              />
+              <KpiCard
+                label="$ cleared to pay"
+                value={formatCurrency(kpis.data.dollars_cleared)}
+                sublabel="Invoice amounts with OK-to-pay recommendations (clear / low risk)"
+                icon={Banknote}
+                tone="success"
+                onAskAI={() =>
+                  openCopilot({
+                    draft:
+                      "How much invoice dollar volume have we cleared as OK to pay, and which vendors?",
+                    contextCheckId: null,
+                  })
+                }
+              />
+            </div>
+          </div>
         </div>
       ) : null}
 
