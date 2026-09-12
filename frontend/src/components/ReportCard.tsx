@@ -211,7 +211,7 @@ function DecisionActions({
               <p className="mt-2 text-xs text-slate-600">Note: {check.decision_note}</p>
             ) : null}
             <p className="mt-2 text-[11px] font-medium text-slate-500">
-              Home KPIs and the results table now show this outcome.
+              Invoice desk KPIs and the results table now show this outcome.
             </p>
             <button
               type="button"
@@ -236,7 +236,7 @@ function DecisionActions({
         Record invoice decision
       </p>
       <p className="mt-1 text-sm text-slate-600">
-        Confirm payment or confirm hold for this invoice. This updates Home and Ask AI — it does not
+        Confirm payment or confirm hold for this invoice. This updates Invoice desk and Ask AI — it does not
         send a bank transfer.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Search } from "lucide-react";
 import { api } from "../lib/api";
 import type { CheckDetail } from "../lib/types";
@@ -27,6 +28,7 @@ export function NewCheckForm({
   /** After confirm pay/hold — parent can close the drawer / navigate. */
   onDecisionRecorded?: (check: CheckDetail) => void;
 }) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [vendorName, setVendorName] = useState("");
   const [address, setAddress] = useState("");
@@ -64,8 +66,19 @@ export function NewCheckForm({
     return (
       <div className="space-y-4">
         <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
-          Research complete. Review the recommendation, then confirm payment or confirm hold so
-          Home reflects the invoice outcome.
+          Research complete. Review below, then confirm payment or hold — or open the{" "}
+          {resultCheck.id != null ? (
+            <button
+              type="button"
+              className="font-semibold underline underline-offset-2 hover:no-underline"
+              onClick={() => navigate(`/checks/${resultCheck.id}`)}
+            >
+              full report
+            </button>
+          ) : (
+            "full report"
+          )}{" "}
+          for the complete evidence trail.
         </div>
         <ReportCard
           check={resultCheck}
@@ -75,6 +88,15 @@ export function NewCheckForm({
             onDecisionRecorded?.(updated);
           }}
         />
+        {resultCheck.id != null ? (
+          <button
+            type="button"
+            className="inline-flex w-full items-center justify-center rounded-lg px-3 py-2 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-200 hover:bg-blue-50"
+            onClick={() => navigate(`/checks/${resultCheck.id}`)}
+          >
+            Open full report →
+          </button>
+        ) : null}
         <Button
           variant="secondary"
           className="w-full"
@@ -115,7 +137,7 @@ export function NewCheckForm({
           disabled={mutation.isPending}
         />
       </Field>
-      <Field label="Invoice amount" hint="Optional — shown on the report and Home totals">
+      <Field label="Invoice amount" hint="Optional — shown on the report and Invoice desk totals">
         <TextInput
           type="number"
           min="0"

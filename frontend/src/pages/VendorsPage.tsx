@@ -112,7 +112,7 @@ export function VendorsPage() {
     <div className="page-shell">
       <PageHeader
         title="Approved vendors"
-        subtitle="Your internal vendor list. Every invoice check on Home compares the payee name and remittance address against this file — add or edit here and the next check uses the update immediately."
+        subtitle="Your internal vendor list. Every invoice check on Invoice desk compares the payee name and remittance address against this file — add or edit here and the next check uses the update immediately."
         actions={
           <Button onClick={openAdd} icon={<PlusCircle className="h-3.5 w-3.5" />}>
             Add vendor
@@ -203,7 +203,7 @@ export function VendorsPage() {
         description={
           drawerMode === "edit"
             ? "Update the address or status on file. The next invoice check for this payee will use these details."
-            : "New vendors appear in Home checks and Ask AI as soon as you save — no restart needed."
+            : "New vendors appear in Invoice desk checks and Ask AI as soon as you save — no restart needed."
         }
       >
         <form

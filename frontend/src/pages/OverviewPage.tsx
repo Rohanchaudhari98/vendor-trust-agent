@@ -48,17 +48,17 @@ export function OverviewPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 max-w-2xl">
             <h1 className="text-xl font-bold text-slate-800">
-              Before you pay — is this payee really who they claim?
+              Verify the payee before you release payment
             </h1>
             <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-              Fraudsters often impersonate a vendor you already pay — same name, wrong address or
-              bank details on the invoice. Paste the payee below; we look them up on the open web
-              with <span className="font-semibold text-teal-800">Tavily</span> and compare to your
-              approved list, then answer <span className="font-semibold text-slate-800">OK to pay</span>
-              , <span className="font-semibold text-slate-800">Hold</span>, or{" "}
-              <span className="font-semibold text-slate-800">Review</span>. Open a report to{" "}
-              <span className="font-semibold text-slate-800">confirm payment or confirm hold</span> so
-              Home shows the invoice outcome.
+              Impersonators often reuse a vendor name you already trust — with the wrong remittance
+              details. Check the invoice payee against your approved list and open-web evidence via{" "}
+              <span className="font-semibold text-teal-800">Tavily</span>, get{" "}
+              <span className="font-semibold text-slate-800">OK to pay</span>,{" "}
+              <span className="font-semibold text-slate-800">Hold</span>, or{" "}
+              <span className="font-semibold text-slate-800">Review</span>, then open the{" "}
+              <span className="font-semibold text-slate-800">full report</span> to confirm payment or
+              hold so this desk shows the outcome.
             </p>
           </div>
           <Button onClick={() => setDrawerOpen(true)} icon={<PlusCircle className="h-3.5 w-3.5" />}>
@@ -156,7 +156,9 @@ export function OverviewPage() {
           <div>
             <CardTitle>Results</CardTitle>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Recommendation vs recorded outcome — open a row to confirm payment or hold
+              Recommendation vs recorded outcome — use{" "}
+              <span className="font-semibold text-slate-700">Full report</span> for evidence and to
+              confirm payment or hold
             </p>
           </div>
         </CardHeader>
@@ -219,7 +221,7 @@ export function OverviewPage() {
       >
         <NewCheckForm
           onDecisionRecorded={() => {
-            // After confirm pay/hold, return to Home so KPIs/table feel updated.
+            // After confirm pay/hold, return to Invoice desk so KPIs/table feel updated.
             window.setTimeout(() => setDrawerOpen(false), 1200);
           }}
         />

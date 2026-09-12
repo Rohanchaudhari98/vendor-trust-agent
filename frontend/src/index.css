@@ -78,6 +78,22 @@ body {
   @apply border-b border-slate-200 transition-colors hover:bg-slate-50;
 }
 
+@keyframes help-nudge-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(5px);
+    opacity: 0.75;
+  }
+}
+
+.help-nudge-bounce {
+  animation: help-nudge-bounce 1.1s ease-in-out infinite;
+}
+
 .table-row td {
   @apply px-4 py-3 align-middle text-sm text-slate-700;
 }

@@ -12,12 +12,12 @@ export const HELP_GUIDE_INTRO =
 export const HELP_TOPICS: HelpTopic[] = [
   {
     title: "Check an invoice before payment",
-    body: "On Home, click Check this invoice. Enter the payee name exactly as printed (and address if shown). We compare your approved-vendor list, search the open web with Tavily, then Nebius drafts a cited Pay / Hold / Review recommendation.",
+    body: "On Invoice desk, click Check this invoice. Enter the payee name exactly as printed (and address if shown). We compare your approved-vendor list, search the open web with Tavily, then Nebius drafts a cited Pay / Hold / Review recommendation.",
     askNext: "Walk me through checking an invoice step by step.",
   },
   {
     title: "Read a report and confirm pay or hold",
-    body: "Open any row on Home. Review the recommendation and evidence. When you’re ready, Confirm payment (recorded) or Confirm hold — that updates Home KPIs and invoice history so the team sees the outcome.",
+    body: "Open Full report on any Results row. Review the recommendation and evidence. When you’re ready, Confirm payment (recorded) or Confirm hold — that updates Invoice desk KPIs and history so the team sees the outcome.",
     askNext: "What should I do after I open a vendor report?",
   },
   {
@@ -27,7 +27,7 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     title: "Approved vendors list",
-    body: "Open Admin → Approved vendors to add a payee or edit the address on file. The next invoice check on Home compares against the updated list immediately — no restart needed. Mismatched remittance details against that list are a common vendor-impersonation warning.",
+    body: "Open Admin → Approved vendors to add a payee or edit the address on file. The next invoice check compares against the updated list immediately — no restart needed. Mismatched remittance details against that list are a common vendor-impersonation warning.",
     askNext: "How does the approved-vendor list affect a check?",
   },
   {

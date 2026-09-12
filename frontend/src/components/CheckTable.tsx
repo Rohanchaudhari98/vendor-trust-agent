@@ -29,6 +29,7 @@ export function CheckTable({ checks }: { checks: CheckSummary[]; dense?: boolean
             <th>Vendor on the invoice</th>
             <th>Amount</th>
             <th>When</th>
+            <th className="text-right">Report</th>
           </tr>
         </thead>
         <tbody>
@@ -66,6 +67,22 @@ export function CheckTable({ checks }: { checks: CheckSummary[]; dense?: boolean
                   {formatCurrency(check.invoice_amount)}
                 </td>
                 <td className="text-xs text-slate-500">{formatRelativeTime(check.created_at)}</td>
+                <td className="align-middle text-right">
+                  {check.id != null ? (
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/checks/${check.id}`);
+                      }}
+                    >
+                      Full report →
+                    </button>
+                  ) : (
+                    <span className="text-xs text-slate-300">—</span>
+                  )}
+                </td>
               </tr>
             );
           })}
