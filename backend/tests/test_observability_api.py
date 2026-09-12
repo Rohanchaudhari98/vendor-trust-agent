@@ -20,6 +20,19 @@ def test_observability_rows_and_aggregate(client, session, monkeypatch):
     # Langfuse region -- pin it here so this test's expected default URL
     # is deterministic regardless of local environment.
     monkeypatch.delenv("LANGFUSE_BASE_URL", raising=False)
+    monkeypatch.delenv("LANGFUSE_PROJECT_ID", raising=False)
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    # Clear cached project-id resolution between tests.
+    from backend.serializers import langfuse_project_id
+
+    langfuse_project_id.cache_clear()
+
+    class _NoProjectClient:
+        def get_trace_url(self, trace_id: str | None = None) -> str | None:
+            return None
+
+    monkeypatch.setattr("langfuse.get_client", lambda: _NoProjectClient())
 
     traced = _seed(
         session,
@@ -48,14 +61,24 @@ def test_observability_rows_and_aggregate(client, session, monkeypatch):
 
 def test_observability_trace_url_honors_custom_langfuse_base_url(client, session, monkeypatch):
     monkeypatch.setenv("LANGFUSE_BASE_URL", "https://self-hosted.example.com/")
+    monkeypatch.setenv("LANGFUSE_PROJECT_ID", "proj-demo")
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    from backend.serializers import langfuse_project_id
+
+    langfuse_project_id.cache_clear()
+
     check = _seed(session, vendor_name="Custom Base Vendor", langfuse_trace_id="trace-xyz")
 
     response = client.get("/api/observability")
     body = response.json()
     row = next(r for r in body["rows"] if r["id"] == check.id)
 
-    assert row["langfuse_trace_url"] == "https://self-hosted.example.com/trace/trace-xyz"
-    assert body["langfuse_url"] == "https://self-hosted.example.com"
+    assert (
+        row["langfuse_trace_url"]
+        == "https://self-hosted.example.com/project/proj-demo/traces/trace-xyz"
+    )
+    assert body["langfuse_url"] == "https://self-hosted.example.com/project/proj-demo/traces"
 
 
 def test_observability_respects_limit(client, session):

@@ -53,7 +53,7 @@ export function ObservabilityPage() {
     <div className="page-shell">
       <PageHeader
         title="Costs & traces"
-        subtitle="What each vendor report cost (Tavily + AI) and how long it took. Open Langfuse for the full project traces, or View on a row for one run."
+        subtitle="What each vendor report cost (Tavily + AI) and how long it took. Open Langfuse for the project trace list, or View for one run (opens Langfuse — not this app)."
         actions={
           data.langfuse_url ? (
             <a
@@ -62,7 +62,7 @@ export function ObservabilityPage() {
               rel="noreferrer"
               className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-white px-3 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
             >
-              Open Langfuse
+              Open Langfuse traces
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           ) : null

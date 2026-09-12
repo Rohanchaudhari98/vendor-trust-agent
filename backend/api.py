@@ -45,7 +45,7 @@ from backend.serializers import (
     check_to_detail,
     check_to_observability_row,
     check_to_summary,
-    langfuse_base_url,
+    langfuse_project_url,
     vendor_master_to_out,
 )
 from backend.internal_records import normalize_name
@@ -293,7 +293,7 @@ def get_observability(
             avg_latency_ms=avg_latency_ms,
             avg_cost_usd=avg_cost_usd,
         ),
-        langfuse_url=langfuse_base_url(),
+        langfuse_url=langfuse_project_url(),
     )
 
 

@@ -5,7 +5,9 @@ backend/api.py and backend/copilot.py never duplicate this logic."""
 
 from __future__ import annotations
 
+import logging
 import os
+from functools import lru_cache
 
 from backend.db import ChatMessage, VendorCheck, VendorMaster
 from backend.internal_records import parse_aliases
@@ -20,14 +22,69 @@ from backend.schemas import (
     VendorMasterOut,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def langfuse_base_url() -> str:
     return os.environ.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com").rstrip("/")
 
 
+@lru_cache(maxsize=1)
+def langfuse_project_id() -> str | None:
+    """Project-scoped UI URLs need this; bare /trace/{id} lands on org home."""
+    from_env = (os.environ.get("LANGFUSE_PROJECT_ID") or "").strip()
+    if from_env:
+        return from_env
+
+    # Resolve once from Langfuse public API using the same keys as tracing.
+    public = (os.environ.get("LANGFUSE_PUBLIC_KEY") or "").strip()
+    secret = (os.environ.get("LANGFUSE_SECRET_KEY") or "").strip()
+    if not public or not secret:
+        return None
+    try:
+        import httpx
+
+        response = httpx.get(
+            f"{langfuse_base_url()}/api/public/projects",
+            auth=(public, secret),
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        projects = response.json().get("data") or []
+        if projects:
+            return projects[0].get("id")
+    except Exception:  # noqa: BLE001 - observability links must never break the API
+        logger.debug("Could not resolve Langfuse project id", exc_info=True)
+    return None
+
+
+def langfuse_project_url() -> str:
+    """Monitoring landing page (project traces), not the org root."""
+    project_id = langfuse_project_id()
+    if project_id:
+        return f"{langfuse_base_url()}/project/{project_id}/traces"
+    return langfuse_base_url()
+
+
 def build_trace_url(trace_id: str | None) -> str | None:
     if not trace_id:
         return None
+
+    project_id = langfuse_project_id()
+    if project_id:
+        return f"{langfuse_base_url()}/project/{project_id}/traces/{trace_id}"
+
+    # SDK can resolve project id from credentials when env is unset.
+    try:
+        from langfuse import get_client
+
+        url = get_client().get_trace_url(trace_id=trace_id)
+        if url:
+            return url
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Degraded fallback — Langfuse often redirects this to org home.
     return f"{langfuse_base_url()}/trace/{trace_id}"
 
 

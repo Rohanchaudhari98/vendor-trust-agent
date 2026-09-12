@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, MessageSquarePlus, SendHorizontal, Sparkles, X } from "lucide-react";
+import {
+  BookOpen,
+  Maximize2,
+  Minimize2,
+  MessageSquarePlus,
+  SendHorizontal,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { api, streamCopilotChat } from "../../lib/api";
 import type { ChatTurn } from "./ChatBubble";
 import { ChatBubble } from "./ChatBubble";
@@ -47,6 +55,8 @@ export function CopilotPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Expanded = readable long answers; compact = more page visible. No backdrop either way.
+  const [expanded, setExpanded] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -167,10 +177,18 @@ export function CopilotPanel() {
   const canStartNew = !isStreaming && (turns.length > 0 || Boolean(history.data?.length));
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-slate-900/40" onClick={closeCopilot} />
-      <aside className="relative flex h-full w-full max-w-md flex-col border-l border-slate-200 bg-[var(--color-surface)] shadow-2xl">
-        <header className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3.5">
+    // Floating panel — no backdrop. Expanded for reading; compact for more page room.
+    <aside
+      className={
+        expanded
+          ? "fixed bottom-4 right-4 z-50 flex w-[min(100vw-1.5rem,40rem)] flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[var(--color-surface)] shadow-2xl shadow-slate-900/20"
+          : "fixed bottom-5 right-5 z-50 flex w-[min(100vw-1.5rem,26rem)] flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[var(--color-surface)] shadow-2xl shadow-slate-900/20"
+      }
+      style={{ height: expanded ? "min(86vh, 52rem)" : "min(58vh, 32rem)" }}
+      role="dialog"
+      aria-label="Ask AI"
+    >
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 bg-white px-3.5 py-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-teal-700">
@@ -184,7 +202,7 @@ export function CopilotPanel() {
               </div>
             </div>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-              Past reports, approved list, or a live Tavily lookup. Answers always cite sources.
+              Past reports, approved list, or a live Tavily lookup.
               {contextCheckId != null ? (
                 <>
                   {" "}
@@ -196,6 +214,16 @@ export function CopilotPanel() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              title={expanded ? "Compact panel — more page visible" : "Expand panel — easier to read"}
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+              aria-label={expanded ? "Compact Ask AI" : "Expand Ask AI"}
+            >
+              {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              {expanded ? "Compact" : "Expand"}
+            </button>
             <button
               type="button"
               onClick={() => void startNewSession()}
@@ -356,7 +384,6 @@ export function CopilotPanel() {
             </button>
           </div>
         </form>
-      </aside>
-    </div>
+    </aside>
   );
 }

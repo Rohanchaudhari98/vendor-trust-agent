@@ -23,12 +23,12 @@ export function ChatBubble({ turn }: { turn: ChatTurn }) {
       >
         {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
       </div>
-      <div className={`max-w-[min(100%,22rem)] space-y-2 sm:max-w-[85%] ${isUser ? "items-end" : ""}`}>
+      <div className={`min-w-0 flex-1 space-y-2 ${isUser ? "items-end" : ""}`}>
         <div
-          className={`rounded-xl px-4 py-3 text-sm ${
+          className={`rounded-xl px-4 py-3 text-[13px] leading-relaxed ${
             isUser
-              ? "rounded-tr-md bg-slate-800 text-white"
-              : "rounded-tl-md border border-slate-200 bg-white text-slate-800 shadow-sm"
+              ? "ml-auto max-w-[92%] rounded-tr-md bg-slate-800 text-white"
+              : "w-full rounded-tl-md border border-slate-200 bg-white text-slate-800 shadow-sm"
           }`}
         >
           {isUser ? (
